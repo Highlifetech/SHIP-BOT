@@ -9,6 +9,11 @@ Scans the following tabs in each spreadsheet:
 DELIVERED rows are skipped individually so layover shipments from the
 previous month that are still in transit will still appear.
 
+Multi-piece UPS shipments: when one tracking number in the sheet belongs
+to a multi-box shipment, the UPS API returns all sibling tracking numbers.
+We consolidate those siblings so that only ONE summary line is shown per
+shipment (e.g. "1ZHE... (5 boxes): 3 arriving Mar 5, 2 unscanned").
+
 Usage:
     python main.py            # Run once
     python main.py --dry-run  # No writes or messages
@@ -18,7 +23,6 @@ import sys
 import logging
 import time
 from datetime import datetime
-
 from config import SHEET_TOKENS, CARRIER_ALIASES, SHEET_OWNERS
 from lark_client import LarkClient
 from carriers import CarrierTracker
@@ -30,12 +34,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 PERMANENT_TABS = {"Hannah", "Lucy", "Other"}
-
 MONTH_NAMES = [
     "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
     "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
 ]
-
 BAD_STATUSES = {"UNKNOWN", "NOT FOUND", ""}
 DONE_STATUSES = {"DELIVERED"}
 
@@ -61,7 +63,6 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
 
     target_tabs = tabs_to_scan()
     tabs_to_process = [t for t in tabs if t["title"] in target_tabs]
-
     if not tabs_to_process:
         logger.warning(
             "No matching tabs in %s. Want: %s. Have: %s",
@@ -73,17 +74,18 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
 
     logger.info("Scanning %s in %s", [t["title"] for t in tabs_to_process], spreadsheet_token)
 
+    # sibling_skip: set of tracking numbers already covered by a multi-box result
+    sibling_skip = set()
+
     for tab in tabs_to_process:
         tab_title = tab["title"]
         sheet_id = tab["sheet_id"]
         logger.info("  Tab: %s (%s)", tab_title, sheet_id)
-
         try:
             rows = lark.read_tracking_data(spreadsheet_token, sheet_id)
         except Exception as e:
             logger.error("  Failed to read tab '%s': %s", tab_title, e)
             continue
-
         logger.info("  %d rows with tracking in '%s'", len(rows), tab_title)
 
         for row in rows:
@@ -92,12 +94,17 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
             current_status = row.get("current_status", "").strip().upper()
 
             if current_status in DONE_STATUSES:
-                logger.info("    Skipping %s - already DELIVERED", tracking_num)
+                logger.info("  Skipping %s - already DELIVERED", tracking_num)
+                continue
+
+            # Skip if this tracking number is a sibling already shown
+            if tracking_num in sibling_skip:
+                logger.info("  Skipping %s - already covered by multi-box parent", tracking_num)
                 continue
 
             carrier = normalize_carrier(carrier_raw)
             if not carrier or carrier not in CARRIER_ALIASES.values():
-                logger.warning("    Row %d: unknown carrier '%s'", row["row_num"], carrier_raw)
+                logger.warning("  Row %d: unknown carrier '%s'", row["row_num"], carrier_raw)
                 all_results.append({
                     **row,
                     "new_status": current_status or "UNKNOWN CARRIER",
@@ -114,11 +121,24 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
             api_error = result.get("error", "")
             packages = result.get("packages", [])
 
+            # Register sibling tracking numbers so we don't double-list them
+            if packages:
+                for pkg in packages:
+                    sib = pkg.get("tracking_num", "").strip()
+                    if sib and sib != tracking_num:
+                        sibling_skip.add(sib)
+                logger.info(
+                    "  %s is a %d-box shipment; registered %d siblings to skip",
+                    tracking_num, len(packages), len(packages) - 1,
+                )
+
             if api_error or new_status.upper() in BAD_STATUSES:
                 display_status = current_status if current_status else "PENDING"
                 logger.warning(
-                    "    %s: API error (%s), keeping '%s'",
-                    tracking_num, str(api_error)[:60], display_status,
+                    "  %s: API error (%s), keeping '%s'",
+                    tracking_num,
+                    str(api_error)[:60],
+                    display_status,
                 )
                 all_results.append({
                     **row,
@@ -133,16 +153,20 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
                 if not dry_run and new_status.upper() != current_status:
                     try:
                         lark.update_tracking_row(
-                            spreadsheet_token, sheet_id,
-                            row["row_num"], new_status, delivery_date,
+                            spreadsheet_token,
+                            sheet_id,
+                            row["row_num"],
+                            new_status,
+                            delivery_date,
                         )
                         logger.info(
-                            "    Updated %s: %s -> %s",
-                            tracking_num, current_status, new_status,
+                            "  Updated %s: %s -> %s",
+                            tracking_num,
+                            current_status,
+                            new_status,
                         )
                     except Exception as e:
-                        logger.error("    Failed to write row %d: %s", row["row_num"], e)
-
+                        logger.error("  Failed to write row %d: %s", row["row_num"], e)
                 all_results.append({
                     **row,
                     "new_status": new_status,
@@ -164,11 +188,10 @@ def run_tracker(dry_run=False, chat_id=None, message_id=None):
         return []
 
     logger.info("Tabs to scan: %s", sorted(tabs_to_scan()))
-
     lark = LarkClient()
     tracker = CarrierTracker()
-
     all_results = []
+
     for token in SHEET_TOKENS:
         logger.info("Processing spreadsheet: %s", token)
         results = process_sheet(lark, tracker, token, dry_run)
@@ -193,9 +216,13 @@ def run_tracker(dry_run=False, chat_id=None, message_id=None):
             pkg_count = len(r.get("packages", []))
             logger.info(
                 "  [%s] %s | %s | %s | %s | %s | %d boxes",
-                r.get("tab"), r["tracking_num"], r["carrier"],
-                r["new_status"], r.get("delivery_date", ""),
-                r.get("customer", ""), pkg_count,
+                r.get("tab"),
+                r["tracking_num"],
+                r["carrier"],
+                r["new_status"],
+                r.get("delivery_date", ""),
+                r.get("customer", ""),
+                pkg_count,
             )
 
     return all_results
