@@ -101,6 +101,7 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
                 all_results.append({
                     **row,
                     "new_status": current_status or "UNKNOWN CARRIER",
+                    "packages": [],
                     "tab": tab_title,
                     "sheet_token": spreadsheet_token,
                 })
@@ -111,20 +112,20 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
             delivery_date = result.get("delivery_date", "")
             raw_status = result.get("raw_status", "")
             api_error = result.get("error", "")
+            packages = result.get("packages", [])
 
             if api_error or new_status.upper() in BAD_STATUSES:
                 display_status = current_status if current_status else "PENDING"
                 logger.warning(
                     "    %s: API error (%s), keeping '%s'",
-                    tracking_num,
-                    str(api_error)[:60],
-                    display_status,
+                    tracking_num, str(api_error)[:60], display_status,
                 )
                 all_results.append({
                     **row,
                     "new_status": display_status,
                     "delivery_date": row.get("delivery_date", ""),
                     "raw_status": raw_status,
+                    "packages": packages,
                     "tab": tab_title,
                     "sheet_token": spreadsheet_token,
                 })
@@ -147,6 +148,7 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
                     "new_status": new_status,
                     "delivery_date": delivery_date,
                     "raw_status": raw_status,
+                    "packages": packages,
                     "tab": tab_title,
                     "sheet_token": spreadsheet_token,
                 })
@@ -188,10 +190,12 @@ def run_tracker(dry_run=False, chat_id=None, message_id=None):
     else:
         logger.info("Dry run complete. Results:")
         for r in all_results:
+            pkg_count = len(r.get("packages", []))
             logger.info(
-                "  [%s] %s | %s | %s | %s | %s",
+                "  [%s] %s | %s | %s | %s | %s | %d boxes",
                 r.get("tab"), r["tracking_num"], r["carrier"],
-                r["new_status"], r.get("delivery_date", ""), r.get("customer", ""),
+                r["new_status"], r.get("delivery_date", ""),
+                r.get("customer", ""), pkg_count,
             )
 
     return all_results
