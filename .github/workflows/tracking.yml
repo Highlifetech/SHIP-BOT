@@ -2,16 +2,13 @@ name: Shipment Tracking Bot
 
 on:
   schedule:
-    # 8:00 AM EST = 13:00 UTC (full summary)
+    # 8:00 AM EST = 13:00 UTC
     - cron: '0 13 * * *'
-    # 8:00 PM EST = 01:00 UTC next day (full summary)
+    # 8:00 PM EST = 01:00 UTC next day
     - cron: '0 1 * * *'
-    # Exception check every 30 min during business hours UTC 13:00-01:00
-    # Skip :00 minutes to avoid double-firing with the full-summary crons above
-    - cron: '30 13-23 * * *'
-    - cron: '0,30 2-12 * * *'
-    - cron: '30 0 * * *'
-  workflow_dispatch: # Allow manual trigger from GitHub UI
+    # Exception check every hour (at :30 to never overlap with 8am/8pm)
+    - cron: '30 * * * *'
+  workflow_dispatch:
 
 jobs:
   track-shipments:
@@ -30,7 +27,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run full tracking bot (8am / 8pm)
+      - name: Run full tracking summary (8am and 8pm EST)
         if: github.event.schedule == '0 13 * * *' || github.event.schedule == '0 1 * * *' || github.event_name == 'workflow_dispatch'
         env:
           LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
@@ -48,8 +45,8 @@ jobs:
           DHL_API_KEY: ${{ secrets.DHL_API_KEY }}
         run: python main.py
 
-      - name: Run exception check (every 30 min)
-        if: github.event.schedule == '30 13-23 * * *' || github.event.schedule == '0,30 2-12 * * *' || github.event.schedule == '30 0 * * *'
+      - name: Check for shipment exceptions (every hour)
+        if: github.event.schedule == '30 * * * *'
         env:
           LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
           LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
