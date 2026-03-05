@@ -76,7 +76,7 @@ def scheduled_exception_check():
     """Check for new shipment exceptions - runs every hour."""
     logger.info("=== SCHEDULED EXCEPTION CHECK ===")
     try:
-                    run_exception_check(external_cache=_status_cache)
+        run_exception_check(external_cache=_status_cache)
         logger.info("Scheduled exception check complete")
     except Exception as e:
         logger.error("Scheduled exception check failed: %s", e)
