@@ -19,17 +19,16 @@ status to the last known status stored in /tmp/shipment_status_cache.json.
 If a new exception/delay is detected, fires an immediate alert to the chat.
 
 Usage:
-    python main.py                     # Run once (full summary)
-    python main.py --dry-run           # No writes or messages
+    python main.py                # Run once (full summary)
+    python main.py --dry-run      # No writes or messages
     python main.py --check-exceptions  # Alert-only: fires only if new issues found
 """
-
 import sys
 import json
 import os
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from config import SHEET_TOKENS, CARRIER_ALIASES, SHEET_OWNERS
 from lark_client import LarkClient
 from carriers import CarrierTracker
@@ -45,11 +44,15 @@ MONTH_NAMES = [
     "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
     "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
 ]
+
 BAD_STATUSES = {"UNKNOWN", "NOT FOUND", ""}
 DONE_STATUSES = {"DELIVERED"}
 
 # Where we store last-known statuses between runs
 STATUS_CACHE_PATH = os.environ.get("STATUS_CACHE_PATH", "/tmp/shipment_status_cache.json")
+
+# EST = UTC-5 (no DST adjustment; for EDT use UTC-4)
+EST = timezone(timedelta(hours=-5))
 
 
 def normalize_carrier(carrier_str):
@@ -57,7 +60,8 @@ def normalize_carrier(carrier_str):
 
 
 def tabs_to_scan():
-    now = datetime.utcnow()
+    # Use EST time so current/previous month matches the business timezone
+    now = datetime.now(EST)
     current = MONTH_NAMES[now.month - 1]
     previous = MONTH_NAMES[(now.month - 2) % 12]
     return PERMANENT_TABS | {current, previous}
@@ -254,7 +258,6 @@ def run_tracker(dry_run=False, chat_id=None, message_id=None):
         return []
 
     logger.info("Tabs to scan: %s", sorted(tabs_to_scan()))
-
     lark = LarkClient()
     tracker = CarrierTracker()
     all_results = []
@@ -297,17 +300,18 @@ def run_tracker(dry_run=False, chat_id=None, message_id=None):
 
 def run_exception_check(external_cache=None):
     """
-    Exception-alert-only run. Checks all shipments every 30 min.
+    Exception-alert-only run. Scans every hour.
     Compares current status to last known status stored in cache.
     Only sends a Lark alert if a NEW exception or delay is detected.
     Does not send the full summary - only fires for problems.
+    Recurring issues (same status as last run) are silently skipped.
     """
     if not SHEET_TOKENS:
         logger.error("No sheet tokens configured.")
         return
 
     logger.info("=== EXCEPTION CHECK MODE ===")
-    cache = external_cache if external_cache is not None else load_status_cache()            
+    cache = external_cache if external_cache is not None else load_status_cache()
 
     lark = LarkClient()
     tracker = CarrierTracker()
@@ -340,6 +344,7 @@ def run_exception_check(external_cache=None):
 
                 if current_status in DONE_STATUSES:
                     continue
+
                 if tracking_num in sibling_skip:
                     continue
 
@@ -369,63 +374,80 @@ def run_exception_check(external_cache=None):
                 last_status = cache.get(cache_key, {}).get("status", "")
                 last_raw = cache.get(cache_key, {}).get("raw_status", "")
 
-                # Detect NEW exception (status or raw message changed to a problem)
+                # Only alert if BOTH the status is an exception AND it changed since last run
+                # This prevents repeated alerts for the same ongoing issue
                 status_changed = new_status != last_status
                 raw_changed = raw_status != last_raw
 
-                if (status_changed or raw_changed) and is_exception_status(new_status, raw_status):
-                    recipient = row.get("recipient", "").strip()
-                    customer = row.get("customer", "").strip()
-                    if recipient.upper() == "CUSTOMER DIRECT":
-                        name = customer or "Unknown"
+                if is_exception_status(new_status, raw_status):
+                    if status_changed or raw_changed:
+                        # Genuinely new exception - alert
+                        recipient = row.get("recipient", "").strip()
+                        customer = row.get("customer", "").strip()
+                        if recipient.upper() == "CUSTOMER DIRECT":
+                            name = customer or "Unknown"
+                        else:
+                            name = recipient or customer or "Unknown"
+                        alerts.append({
+                            "tracking_num": tracking_num,
+                            "carrier": carrier_raw.upper(),
+                            "name": name,
+                            "tab": tab_title,
+                            "new_status": new_status,
+                            "raw_status": raw_status,
+                            "prev_status": last_status,
+                        })
+                        logger.warning(
+                            "NEW EXCEPTION on %s (%s): %s -> %s | %s",
+                            tracking_num, carrier_raw, last_status, new_status, raw_status
+                        )
                     else:
-                        name = recipient or customer or "Unknown"
-
-                    alerts.append({
-                        "tracking_num": tracking_num,
-                        "carrier": carrier_raw.upper(),
-                        "name": name,
-                        "tab": tab_title,
-                        "new_status": new_status,
-                        "raw_status": raw_status,
-                        "prev_status": last_status,
-                    })
-                    logger.warning(
-                        "NEW EXCEPTION on %s (%s): %s -> %s | %s",
-                        tracking_num, carrier_raw, last_status, new_status, raw_status
-                    )
+                        # Same exception as before - skip, no repeated alert
+                        logger.info(
+                            "Recurring exception on %s (%s): %s (no alert)",
+                            tracking_num, carrier_raw, new_status
+                        )
 
                 # Check package-level exceptions for multi-box UPS
                 if packages:
                     for pkg in packages:
                         pkg_tn = pkg.get("tracking_num", "")
                         pkg_status = pkg.get("status", "").upper()
-                        pkg_cache_key = pkg_tn
-                        last_pkg_status = cache.get(pkg_cache_key, {}).get("status", "")
-                        if pkg_status != last_pkg_status and is_exception_status(pkg_status):
-                            recipient = row.get("recipient", "").strip()
-                            customer = row.get("customer", "").strip()
-                            if recipient.upper() == "CUSTOMER DIRECT":
-                                name = customer or "Unknown"
-                            else:
-                                name = recipient or customer or "Unknown"
-                            alerts.append({
-                                "tracking_num": pkg_tn,
-                                "carrier": "UPS",
-                                "name": name,
-                                "tab": tab_title,
-                                "new_status": pkg_status,
-                                "raw_status": "",
-                                "prev_status": last_pkg_status,
-                                "parent_tracking": tracking_num,
-                            })
-                            logger.warning(
-                                "NEW EXCEPTION on UPS sibling %s: %s -> %s",
-                                pkg_tn, last_pkg_status, pkg_status
-                            )
-                        cache[pkg_cache_key] = {"status": pkg_status, "raw_status": ""}
+                        pkg_raw = pkg.get("raw_status", "")
+                        last_pkg_status = cache.get(pkg_tn, {}).get("status", "")
+                        last_pkg_raw = cache.get(pkg_tn, {}).get("raw_status", "")
 
-                # Update cache
+                        if is_exception_status(pkg_status, pkg_raw):
+                            if pkg_status != last_pkg_status or pkg_raw != last_pkg_raw:
+                                recipient = row.get("recipient", "").strip()
+                                customer = row.get("customer", "").strip()
+                                if recipient.upper() == "CUSTOMER DIRECT":
+                                    name = customer or "Unknown"
+                                else:
+                                    name = recipient or customer or "Unknown"
+                                alerts.append({
+                                    "tracking_num": pkg_tn,
+                                    "carrier": "UPS",
+                                    "name": name,
+                                    "tab": tab_title,
+                                    "new_status": pkg_status,
+                                    "raw_status": pkg_raw,
+                                    "prev_status": last_pkg_status,
+                                    "parent_tracking": tracking_num,
+                                })
+                                logger.warning(
+                                    "NEW EXCEPTION on UPS sibling %s: %s -> %s",
+                                    pkg_tn, last_pkg_status, pkg_status
+                                )
+                            else:
+                                logger.info(
+                                    "Recurring exception on UPS sibling %s: %s (no alert)",
+                                    pkg_tn, pkg_status
+                                )
+
+                        cache[pkg_tn] = {"status": pkg_status, "raw_status": pkg_raw}
+
+                # Update cache with current status (always, so next run can compare)
                 cache[cache_key] = {"status": new_status, "raw_status": raw_status}
                 time.sleep(0.5)
 
