@@ -6,8 +6,8 @@ on:
     - cron: '0 13 * * *'
     # 8:00 PM EST = 01:00 UTC next day
     - cron: '0 1 * * *'
-    # Exception check every hour (at :30 to never overlap with 8am/8pm)
-    - cron: '30 * * * *'
+    # Exception check every 2 hours (at :30 to never overlap with 8am/8pm)
+    - cron: '30 */2 * * *'
   workflow_dispatch:
 
 jobs:
@@ -31,9 +31,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: /tmp/shipment_status_cache.json
-          key: shipment-status-cache
+          key: shipment-status-cache-${{ github.run_id }}
           restore-keys: |
-            shipment-status-cache
+            shipment-status-cache-
 
       - name: Run full tracking summary (8am and 8pm EST)
         if: >
@@ -57,8 +57,8 @@ jobs:
           STATUS_CACHE_PATH: /tmp/shipment_status_cache.json
         run: python main.py
 
-      - name: Check for shipment exceptions (every hour)
-        if: github.event.schedule == '30 * * * *'
+      - name: Check for shipment exceptions (every 2 hours)
+        if: github.event.schedule == '30 */2 * * *'
         env:
           LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
           LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
@@ -81,4 +81,4 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: /tmp/shipment_status_cache.json
-          key: shipment-status-cache
+          key: shipment-status-cache-${{ github.run_id }}
