@@ -3,13 +3,13 @@ Lark Shipment Tracking Bot - Webhook Server
 
 Runs as a persistent web server (via gunicorn on Railway).
 Handles two responsibilities:
-  1. Scheduled runs: 8am and 8pm EST full summary, every 2 hours exception check
+  1. Scheduled runs: 8am, 1pm, and 8pm EST full summary
   2. @mention trigger: when the bot is @mentioned, run the full tracker and reply in-thread
 
 Schedule (all times US Eastern):
   - 8:00 AM  -> full shipment summary to HLT INBOUND DELIVERIES
+  - 1:00 PM  -> full shipment summary to HLT INBOUND DELIVERIES
   - 8:00 PM  -> full shipment summary to HLT INBOUND DELIVERIES
-  - Every hour at :00  -> exception/delay check, only alerts if something is wrong
 
 Deployed on Railway:
   - Procfile: web: gunicorn webhook_server:app --bind 0.0.0.0:$PORT
@@ -26,7 +26,7 @@ from flask import Flask, request, jsonify
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
-from main import run_tracker, run_exception_check
+from main import run_tracker
 from lark_client import LarkClient
 
 logging.basicConfig(
@@ -54,8 +54,6 @@ _dedup_lock = threading.Lock()
 # Timezone for scheduling
 EASTERN = pytz.timezone("America/New_York")
 
-# In-memory status cache - persists across hourly checks within same process
-_status_cache = {}
 
 
 # -------------------------------------------------------------------------
@@ -72,16 +70,6 @@ def scheduled_full_summary():
         logger.error("Scheduled full summary failed: %s", e)
 
 
-def scheduled_exception_check():
-    """Check for new shipment exceptions - runs every 2 hours."""
-    logger.info("=== SCHEDULED EXCEPTION CHECK ===")
-    try:
-        run_exception_check(external_cache=_status_cache)
-        logger.info("Scheduled exception check complete")
-    except Exception as e:
-        logger.error("Scheduled exception check failed: %s", e)
-
-
 def start_scheduler():
     """Start the APScheduler with precise Eastern time schedules."""
     scheduler = BackgroundScheduler(timezone=EASTERN)
@@ -95,6 +83,15 @@ def start_scheduler():
         replace_existing=True,
     )
 
+    # Full summary at exactly 1:00 PM Eastern
+    scheduler.add_job(
+        scheduled_full_summary,
+        CronTrigger(hour=13, minute=0, timezone=EASTERN),
+        id="summary_1pm",
+        name="1pm Full Summary",
+        replace_existing=True,
+    )
+
     # Full summary at exactly 8:00 PM Eastern
     scheduler.add_job(
         scheduled_full_summary,
@@ -104,17 +101,10 @@ def start_scheduler():
         replace_existing=True,
     )
 
-    # Exception check every 2 hours at :00
-    scheduler.add_job(
-        scheduled_exception_check,
-        CronTrigger(hour="*/2", minute=0, timezone=EASTERN),
-        id="exception_check_2hourly",
-        name="Exception Check Every 2 Hours",
-        replace_existing=True,
-    )
+
 
     scheduler.start()
-    logger.info("Scheduler started: 8am summary, 8pm summary, every 2 hours exception check (Eastern time)")
+    logger.info("Scheduler started: 8am, 1pm, 8pm summary (Eastern time)")
     return scheduler
 
 
