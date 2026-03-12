@@ -455,12 +455,20 @@ class LarkClient:
         """
         Send a red-banner alert card for newly detected shipping exceptions.
         alerts: list of dicts with keys: tracking_num, carrier, name, tab,
-                new_status, raw_status, prev_status, (optional) parent_tracking
+                new_status, raw_status, prev_status, num_boxes,
+                (optional) parent_tracking
         """
         target_chat = chat_id or LARK_CHAT_ID
         if not target_chat:
             logger.warning("No chat_id configured, skipping exception alerts")
             return
+
+        MONTH_NAMES = [
+            "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+            "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
+        ]
+        now = datetime.now()
+        current_month = MONTH_NAMES[now.month - 1]
 
         NL = chr(10)
         lines = ["**HLT Shipment Alert**", NL + "The following shipments need attention:"]
@@ -472,16 +480,32 @@ class LarkClient:
             tab = a.get("tab", "")
             raw = a.get("raw_status", "").strip()
             parent = a.get("parent_tracking", "")
+            num_boxes = a.get("num_boxes", "").strip()
 
             if raw:
                 detail = raw
             else:
                 detail = a.get("new_status", "").title()
 
-            if parent:
-                line = f"- **{carrier}** {tracking} (part of {parent}) -- {name} [{tab}]: {detail}"
+            # Build box count tag
+            if num_boxes and num_boxes != "1":
+                box_tag = f" ({num_boxes} boxes)"
+            elif num_boxes == "1":
+                box_tag = " (1 box)"
             else:
-                line = f"- **{carrier}** {tracking} -- {name} [{tab}]: {detail}"
+                box_tag = ""
+
+            # Show month tag only if tab is a month tab different from current
+            tab_upper = tab.upper().strip()
+            if tab_upper in MONTH_NAMES and tab_upper != current_month:
+                month_tag = f" [{tab_upper}]"
+            else:
+                month_tag = ""
+
+            if parent:
+                line = f"- **{carrier}** {tracking}{box_tag} -- {name}{month_tag}: {detail}"
+            else:
+                line = f"- **{carrier}** {tracking}{box_tag} -- {name}{month_tag}: {detail}"
 
             lines.append(line)
 
