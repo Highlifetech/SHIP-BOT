@@ -3,7 +3,7 @@ Lark Shipment Tracking Bot - Webhook Server
 
 Runs as a persistent web server (via gunicorn on Railway).
 Handles two responsibilities:
-  1. Scheduled runs: 8am and 8pm EST full summary, every hour exception check
+  1. Scheduled runs: 8am and 8pm EST full summary, every 2 hours exception check
   2. @mention trigger: when the bot is @mentioned, run the full tracker and reply in-thread
 
 Schedule (all times US Eastern):
@@ -73,7 +73,7 @@ def scheduled_full_summary():
 
 
 def scheduled_exception_check():
-    """Check for new shipment exceptions - runs every hour."""
+    """Check for new shipment exceptions - runs every 2 hours."""
     logger.info("=== SCHEDULED EXCEPTION CHECK ===")
     try:
         run_exception_check(external_cache=_status_cache)
@@ -104,17 +104,17 @@ def start_scheduler():
         replace_existing=True,
     )
 
-    # Exception check every hour at :00
+    # Exception check every 2 hours at :00
     scheduler.add_job(
         scheduled_exception_check,
-        CronTrigger(minute=0, timezone=EASTERN),
-        id="exception_check_hourly",
-        name="Hourly Exception Check",
+        CronTrigger(hour="*/2", minute=0, timezone=EASTERN),
+        id="exception_check_2hourly",
+        name="Exception Check Every 2 Hours",
         replace_existing=True,
     )
 
     scheduler.start()
-    logger.info("Scheduler started: 8am summary, 8pm summary, hourly exception check (Eastern time)")
+    logger.info("Scheduler started: 8am summary, 8pm summary, every 2 hours exception check (Eastern time)")
     return scheduler
 
 
