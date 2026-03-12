@@ -396,6 +396,7 @@ def run_exception_check(external_cache=None):
                             "new_status": new_status,
                             "raw_status": raw_status,
                             "prev_status": last_status,
+                            "num_boxes": row.get("num_boxes", ""),
                         })
                         logger.warning(
                             "NEW EXCEPTION on %s (%s): %s -> %s | %s",
