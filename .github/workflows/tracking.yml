@@ -2,21 +2,18 @@ name: Shipment Tracking Bot
 
 on:
   schedule:
-    # 8:00 AM ET: 12:00 UTC (EDT) or 13:00 UTC (EST)
+    # 8:00 AM ET (12:00 UTC during EDT, 13:00 UTC during EST — off by 1 hr in winter, acceptable)
     - cron: '0 12 * * *'
-    - cron: '0 13 * * *'
-    # 1:00 PM ET: 17:00 UTC (EDT) or 18:00 UTC (EST)
+    # 1:00 PM ET (17:00 UTC during EDT)
     - cron: '0 17 * * *'
-    - cron: '0 18 * * *'
-    # 8:00 PM ET: 00:00 UTC (EDT) or 01:00 UTC (EST)
+    # 8:00 PM ET (00:00 UTC during EDT)
     - cron: '0 0 * * *'
-    - cron: '0 1 * * *'
   workflow_dispatch:
 
 jobs:
   track-shipments:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
