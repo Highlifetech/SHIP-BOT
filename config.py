@@ -112,13 +112,14 @@ CARRIER_ALIASES = {
 }
 
 # Status values the bot writes to the sheet (column M)
+# MUST match the 4 dropdown options in the Lark Sheet exactly
 STATUS_MAP = {
-    "delivered":       "DELIVERED",
-    "in_transit":      "IN TRANSIT",
-    "out_for_delivery": "OUT FOR DELIVERY",
-    "exception":       "EXCEPTION",
-    "pending":         "PENDING",
-    "label_created":   "LABEL CREATED",
-    "unknown":         "UNKNOWN",
-    "not_found":       "NOT FOUND",
+        "delivered":        "DELIVERED",
+        "in_transit":       "IN TRANSIT",
+        "out_for_delivery": "IN TRANSIT",
+        "exception":        "EXCEPTION/DELAY",
+        "pending":          "LABEL CREATED/NOT SCANNED",
+        "label_created":    "LABEL CREATED/NOT SCANNED",
+        "unknown":          "LABEL CREATED/NOT SCANNED",
+        "not_found":        "LABEL CREATED/NOT SCANNED",
 }
