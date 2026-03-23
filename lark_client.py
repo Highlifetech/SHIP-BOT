@@ -200,10 +200,12 @@ class LarkClient:
             raise Exception(f"Failed to write cells: {data}")
         logger.info("Updated %d cells in sheet %s", len(updates), sheet_id)
 
-    def update_tracking_row(self, spreadsheet_token, sheet_id, row_num, status, delivery_date=""):
+    def update_tracking_row(self, spreadsheet_token, sheet_id, row_num, status, delivery_date="", num_boxes=""):
         updates = [{"row": row_num, "col": COLUMNS["status"], "value": status}]
         if delivery_date:
             updates.append({"row": row_num, "col": COLUMNS["delivery_date"], "value": delivery_date})
+        if num_boxes:
+            updates.append({"row": row_num, "col": COLUMNS["num_boxes"], "value": str(num_boxes)})
         self.write_cells(spreadsheet_token, sheet_id, updates)
 
     def send_group_message(self, message, chat_id=None, message_id=None):
