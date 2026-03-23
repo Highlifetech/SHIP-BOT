@@ -211,8 +211,8 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
                     if sib and sib != tracking_num:
                         sibling_skip.add(sib)
 
-                      if api_error or result.get("status_key", "") in BAD_STATUS_KEYS:
-                            display_status = current_status if current_status else "LABEL CREATED/NOT SCANNED"
+                if api_error or result.get("status_key", "") in BAD_STATUS_KEYS:
+                      display_status = current_status if current_status else "LABEL CREATED/NOT SCANNED"
                 logger.warning(
                     "  %s: API error (%s), keeping '%s'",
                     tracking_num, str(api_error)[:60], display_status,
