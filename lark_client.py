@@ -384,20 +384,16 @@ class LarkClient:
         else:
             box_tag = ""
 
-        if status == "DELIVERED":
-            date_str = LarkClient._format_delivery_date(delivery) if delivery else "delivered"
-        elif status == "OUT FOR DELIVERY":
-            date_str = "out for delivery today"
-        elif status == "LABEL CREATED":
-            date_str = "waiting to ship"
-        elif status == "EXCEPTION":
-            date_str = f"exception - {raw}" if raw else "exception"
-        elif status in ("UNKNOWN", "NOT FOUND", "PENDING", ""):
-            date_str = "pending"
-        elif delivery:
-            date_str = LarkClient._format_delivery_date(delivery)
-        else:
-            date_str = "in transit"
+                if status == "DELIVERED":
+                                date_str = LarkClient._format_delivery_date(delivery) if delivery else "delivered"
+                elif status == "EXCEPTION/DELAY":
+                                date_str = f"exception - {raw}" if raw else "exception"
+                elif status == "LABEL CREATED/NOT SCANNED":
+                                date_str = "waiting to ship"
+                elif delivery:
+                                date_str = LarkClient._format_delivery_date(delivery)
+                else:
+                                date_str = "in transit"
 
         return f"{tracking}{box_tag} -- {name} -- {date_str}"
 
