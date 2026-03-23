@@ -32,9 +32,9 @@ import os
 import logging
 import time
 from datetime import datetime, timezone, timedelta
-from config import SHEET_TOKENS, CARRIER_ALIASES, SHEET_OWNERS
+from config import SHEET_TOKENS, CARRIER_ALIASES, SHEET_OWNERS, STATUS_MAP, COLUMNS
 from lark_client import LarkClient
-from carriers import CarrierTracker
+from carriers import CarrierTracker, _fmt_date
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,6 +54,61 @@ DONE_STATUSES = {"DELIVERED"}
 SCHEDULED_TIMES_ET = [(8, 0), (13, 0), (20, 0)]   # 8 AM, 1 PM, 8 PM
 # Allow this many minutes on either side of a scheduled time
 SCHEDULE_WINDOW_MINUTES = 45
+
+# Valid dropdown values for Status column (M)
+VALID_STATUSES = {"DELIVERED", "IN TRANSIT", "EXCEPTION/DELAY", "LABEL CREATED/NOT SCANNED"}
+
+STATUS_NORMALIZE = {
+    "delivered": "DELIVERED",
+    "in transit": "IN TRANSIT", "in_transit": "IN TRANSIT", "intransit": "IN TRANSIT",
+    "out for delivery": "IN TRANSIT", "out_for_delivery": "IN TRANSIT",
+    "exception": "EXCEPTION/DELAY", "exception/delay": "EXCEPTION/DELAY",
+    "delay": "EXCEPTION/DELAY", "alert": "EXCEPTION/DELAY",
+    "label created": "LABEL CREATED/NOT SCANNED", "label_created": "LABEL CREATED/NOT SCANNED",
+    "label created/not scanned": "LABEL CREATED/NOT SCANNED",
+    "not scanned": "LABEL CREATED/NOT SCANNED", "pending": "LABEL CREATED/NOT SCANNED",
+    "pre-shipment": "LABEL CREATED/NOT SCANNED", "unknown": "LABEL CREATED/NOT SCANNED",
+    "not_found": "LABEL CREATED/NOT SCANNED", "not found": "LABEL CREATED/NOT SCANNED",
+}
+
+
+def validate_and_fix_rows(lark, spreadsheet_token, sheet_id, rows):
+    """Check every row for bad status values or date formats and correct them."""
+    fixes = []
+    for row_data in rows:
+        row_num = row_data["row_num"]
+        # -- Status --
+        status = row_data.get("current_status", "").strip()
+        if status and status not in VALID_STATUSES:
+            new_status = STATUS_NORMALIZE.get(status.lower())
+            if new_status is None:
+                upper = status.upper()
+                if "DELIVER" in upper:
+                    new_status = "DELIVERED"
+                elif "TRANSIT" in upper or "OUT FOR" in upper:
+                    new_status = "IN TRANSIT"
+                elif "EXCEPTION" in upper or "DELAY" in upper:
+                    new_status = "EXCEPTION/DELAY"
+                else:
+                    new_status = "LABEL CREATED/NOT SCANNED"
+            fixes.append({"row": row_num, "col": COLUMNS["status"], "value": new_status})
+            row_data["current_status"] = new_status
+            logger.info("    Row %d status fix: '%s' -> '%s'", row_num, status, new_status)
+        # -- Delivery Date --
+        raw_date = row_data.get("delivery_date", "").strip()
+        if raw_date:
+            fixed_date = _fmt_date(raw_date)
+            if fixed_date and fixed_date != raw_date:
+                fixes.append({"row": row_num, "col": COLUMNS["delivery_date"], "value": fixed_date})
+                row_data["delivery_date"] = fixed_date
+                logger.info("    Row %d date fix: '%s' -> '%s'", row_num, raw_date, fixed_date)
+    if fixes:
+        try:
+            lark.write_cells(spreadsheet_token, sheet_id, fixes)
+            logger.info("    Validated %d cells", len(fixes))
+        except Exception as e:
+            logger.error("    Validation write failed: %s", e)
+
 
 # EST = UTC-5 (standard); EDT = UTC-4 (daylight saving)
 # We use pytz-aware Eastern time so DST is handled correctly.
@@ -173,6 +228,10 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
             logger.error("  Failed to read tab '%s': %s", tab_title, e)
             continue
         logger.info("  %d rows with tracking in '%s'", len(rows), tab_title)
+
+        # Validate and fix any bad status values or date formats
+        if not dry_run:
+            validate_and_fix_rows(lark, spreadsheet_token, sheet_id, rows)
 
         for row in rows:
             tracking_num = row["tracking_num"]
@@ -296,14 +355,7 @@ def main():
         logger.info("Done!")
         return
 
-    if not force and not is_scheduled_time():
-        now_et = _eastern_now()
-        logger.info(
-            "Current ET time %s is not within %d min of a scheduled send time %s. "
-            "Skipping. Use --force to override.",
-            now_et.strftime("%H:%M"), SCHEDULE_WINDOW_MINUTES, SCHEDULED_TIMES_ET
-        )
-        return
+    # Always run when triggered (scheduling handled by cron in tracking.yml)
 
     now_et = _eastern_now()
     logger.info("Running at ET time: %s", now_et.strftime("%Y-%m-%d %H:%M %Z"))
@@ -489,6 +541,10 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
             continue
         logger.info("  %d rows with tracking in '%s'", len(rows), tab_title)
 
+
+              # Validate and fix any bad status values or date formats
+              if not dry_run:
+                            validate_and_fix_rows(lark, spreadsheet_token, sheet_id, rows)
         for row in rows:
             tracking_num = row["tracking_num"]
             carrier_raw = row["carrier"]
@@ -608,15 +664,6 @@ def main():
         logger.info("=== DRY RUN MODE - no writes or messages ===")
         run_tracker(dry_run=True)
         logger.info("Done!")
-        return
-
-    if not force and not is_scheduled_time():
-        now_et = _eastern_now()
-        logger.info(
-            "Current ET time %s is not within %d min of a scheduled send time %s. "
-            "Skipping. Use --force to override.",
-            now_et.strftime("%H:%M"), SCHEDULE_WINDOW_MINUTES, SCHEDULED_TIMES_ET
-        )
         return
 
     now_et = _eastern_now()
