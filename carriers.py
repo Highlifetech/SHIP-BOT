@@ -37,6 +37,20 @@ HEADERS = {
 }
 
 
+def _fmt_date(date_str):
+    """Convert YYYY-MM-DD to MM-DD-YYYY for the Lark Sheet."""
+    if not date_str:
+        return ""
+    raw = date_str.strip()[:10]
+    for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%m/%d/%Y", "%m-%d-%Y"):
+        try:
+            dt = datetime.strptime(raw, fmt)
+            return dt.strftime("%m-%d-%Y")
+        except (ValueError, TypeError):
+            continue
+    return date_str
+
+
 def normalize_result(status, delivery_date="", location="",
                      raw_status="", error="", packages=None):
     """Return a standardized tracking result.
@@ -47,7 +61,7 @@ def normalize_result(status, delivery_date="", location="",
     return {
         "status": STATUS_MAP.get(status, STATUS_MAP["unknown"]),
         "status_key": status,
-        "delivery_date": delivery_date,
+        "delivery_date": _fmt_date(delivery_date),
         "location": location,
         "raw_status": raw_status,
         "error": error,
@@ -156,7 +170,7 @@ class FedExTracker:
 
 
 # =============================================================================
-# UPS Tracking API — with multi-piece shipment support
+# UPS Tracking API â with multi-piece shipment support
 # =============================================================================
 class UPSTracker:
     TOKEN_URL = "https://onlinetools.ups.com/security/v1/oauth/token"
