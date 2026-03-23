@@ -47,7 +47,7 @@ MONTH_NAMES = [
     "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
     "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
 ]
-BAD_STATUSES = {"UNKNOWN", "NOT FOUND", ""}
+BAD_STATUS_KEYS = {"unknown", "not_found", ""}  # internal status keys that mean "no real update"
 DONE_STATUSES = {"DELIVERED"}
 
 # Scheduled send times in Eastern Time (hour, minute)
@@ -191,7 +191,7 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
                 logger.warning("  Row %d: unknown carrier '%s'", row["row_num"], carrier_raw)
                 all_results.append({
                     **row,
-                    "new_status": current_status or "UNKNOWN CARRIER",
+                                  "new_status": current_status or "LABEL CREATED/NOT SCANNED",
                     "packages": [],
                     "tab": tab_title,
                     "sheet_token": spreadsheet_token,
@@ -211,8 +211,8 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
                     if sib and sib != tracking_num:
                         sibling_skip.add(sib)
 
-            if api_error or new_status.upper() in BAD_STATUSES:
-                display_status = current_status if current_status else "PENDING"
+                      if api_error or result.get("status_key", "") in BAD_STATUS_KEYS:
+                            display_status = current_status if current_status else "LABEL CREATED/NOT SCANNED"
                 logger.warning(
                     "  %s: API error (%s), keeping '%s'",
                     tracking_num, str(api_error)[:60], display_status,
