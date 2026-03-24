@@ -346,21 +346,24 @@ def run_tracker(dry_run=False, chat_id=None, message_id=None):
 
 
 def main():
-    dry_run = "--dry-run" in sys.argv
-    force = "--force" in sys.argv
+    try:
+        dry_run = "--dry-run" in sys.argv
+        force = "--force" in sys.argv
 
-    if dry_run:
-        logger.info("=== DRY RUN MODE - no writes or messages ===")
-        run_tracker(dry_run=True)
+        if dry_run:
+            logger.info("=== DRY RUN MODE - no writes or messages ===")
+            run_tracker(dry_run=True)
+            logger.info("Done!")
+            return
+
+        # Always run when triggered (scheduling handled by cron in tracking.yml)
+
+        now_et = _eastern_now()
+        logger.info("Running at ET time: %s", now_et.strftime("%Y-%m-%d %H:%M %Z"))
+        run_tracker(dry_run=False)
         logger.info("Done!")
-        return
-
-    # Always run when triggered (scheduling handled by cron in tracking.yml)
-
-    now_et = _eastern_now()
-    logger.info("Running at ET time: %s", now_et.strftime("%Y-%m-%d %H:%M %Z"))
-    run_tracker(dry_run=False)
-    logger.info("Done!")
+    except Exception as e:
+        logger.error("Fatal error in main: %s", e, exc_info=True)
 
 
 if __name__ == "__main__":
