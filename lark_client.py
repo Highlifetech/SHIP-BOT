@@ -1,16 +1,17 @@
 """
 Lark API Client
 
-Handles authentication, reading/writing Lark Sheets, and sending group chat messages.
+Handles authentication, reading/writing Lark Sheets, and sending
+group chat messages.
+
 Supports both scheduled runs and @mention triggers from Lark chat.
 
 Sheet structure note:
     Many shipment groups span multiple rows (one row per customer/order).
-        The Shipment ID, Tracking #, Carrier, and Num Boxes columns are only filled
-            on the FIRST row of each group - sub-rows leave them blank and inherit the
-                values from the row above.  read_tracking_data() carries those fields forward.
-                """
-
+    The Shipment ID, Tracking #, Carrier, and Num Boxes columns are only filled
+    on the FIRST row of each group - sub-rows leave them blank and inherit the
+    values from the row above.  read_tracking_data() carries those fields forward.
+"""
 import json
 import logging
 from collections import defaultdict
@@ -35,281 +36,261 @@ PERMANENT_TABS = ["Hannah", "Lucy", "Other"]
 
 
 class LarkClient:
-        """Client for Lark Suite API (Sheets + Messaging)."""
+    """Client for Lark Suite API (Sheets + Messaging)."""
 
     def __init__(self):
-                self.base_url = LARK_BASE_URL.rstrip("/")
-                self.token = None
-                self.token_expires = 0
+        self.base_url = LARK_BASE_URL.rstrip("/")
+        self.token = None
+        self.token_expires = 0
 
     def _get_tenant_token(self):
-                if self.token and time.time() < self.token_expires:
-                                return self.token
-                            url = f"{self.base_url}/open-apis/auth/v3/tenant_access_token/internal"
+        if self.token and time.time() < self.token_expires:
+            return self.token
+        url = f"{self.base_url}/open-apis/auth/v3/tenant_access_token/internal"
         resp = requests.post(url, json={
-                        "app_id": LARK_APP_ID,
-                        "app_secret": LARK_APP_SECRET,
+            "app_id": LARK_APP_ID,
+            "app_secret": LARK_APP_SECRET,
         }, timeout=30)
         resp.raise_for_status()
         data = resp.json()
         if data.get("code") != 0:
-                        raise Exception(f"Lark auth failed: {data}")
-                    self.token = data["tenant_access_token"]
+            raise Exception(f"Lark auth failed: {data}")
+        self.token = data["tenant_access_token"]
         self.token_expires = time.time() + data.get("expire", 7200) - 300
         logger.info("Lark tenant token acquired")
         return self.token
 
     def _headers(self):
-                return {
-                    "Authorization": f"Bearer {self._get_tenant_token()}",
-                    "Content-Type": "application/json",
-    }
+        return {
+            "Authorization": f"Bearer {self._get_tenant_token()}",
+            "Content-Type": "application/json",
+        }
 
     def get_sheet_metadata(self, spreadsheet_token):
-                url_v3 = f"{self.base_url}/open-apis/sheets/v3/spreadsheets/{spreadsheet_token}/sheets/query"
+        url_v3 = f"{self.base_url}/open-apis/sheets/v3/spreadsheets/{spreadsheet_token}/sheets/query"
         resp = requests.get(url_v3, headers=self._headers(), timeout=30)
         if resp.ok:
-                        data = resp.json()
-                        if data.get("code") == 0:
-                                            return self._parse_sheets(data.get("data", {}).get("sheets", []), spreadsheet_token)
-                                        logger.error("v3 code=%s msg=%s token=%s",
-                                                                              data.get("code"), data.get("msg"), spreadsheet_token)
-else:
-            logger.error("v3 HTTP %s token=%s body=%s",
-                                                  resp.status_code, spreadsheet_token, resp.text[:200])
-
+            data = resp.json()
+            if data.get("code") == 0:
+                return self._parse_sheets(data.get("data", {}).get("sheets", []), spreadsheet_token)
+            logger.error("v3 code=%s msg=%s token=%s", data.get("code"), data.get("msg"), spreadsheet_token)
+        else:
+            logger.error("v3 HTTP %s token=%s body=%s", resp.status_code, spreadsheet_token, resp.text[:200])
         url_v2 = f"{self.base_url}/open-apis/sheets/v2/spreadsheets/{spreadsheet_token}/metainfo"
         resp2 = requests.get(url_v2, headers=self._headers(), timeout=30)
         if resp2.ok:
-                        data2 = resp2.json()
+            data2 = resp2.json()
             if data2.get("code") == 0:
-                                sheets_raw = data2.get("data", {}).get("sheets", [])
-                                sheets = [{"title": s.get("title", ""),
-                                           "sheet_id": s.get("sheetId", "")} for s in sheets_raw]
-                                return self._parse_sheets(sheets, spreadsheet_token)
-                            raise Exception(
-                                                f"Cannot read spreadsheet {spreadsheet_token}: "
-                                                f"code={data2.get('code')} msg={data2.get('msg')}"
-                            )
+                sheets_raw = data2.get("data", {}).get("sheets", [])
+                sheets = [{"title": s.get("title", ""), "sheet_id": s.get("sheetId", "")} for s in sheets_raw]
+                return self._parse_sheets(sheets, spreadsheet_token)
+            raise Exception(
+                f"Cannot read spreadsheet {spreadsheet_token}: "
+                f"code={data2.get('code')} msg={data2.get('msg')}"
+            )
         raise Exception(f"Cannot read spreadsheet {spreadsheet_token}: HTTP {resp2.status_code}")
 
     def _parse_sheets(self, sheets, spreadsheet_token):
-                result = []
+        result = []
         for s in sheets:
-                        title = s.get("title", "")
+            title = s.get("title", "")
             sheet_id = s.get("sheet_id", "")
             if title not in SKIP_TABS:
-                                result.append({"title": title, "sheet_id": sheet_id})
-                        logger.info("Found %d processable tabs in %s", len(result), spreadsheet_token)
+                result.append({"title": title, "sheet_id": sheet_id})
+        logger.info("Found %d processable tabs in %s", len(result), spreadsheet_token)
         return result
 
-    def read_sheet_range(self, spreadsheet_token, sheet_id, start_col, end_col,
-                                                  start_row, end_row):
-                                                              range_str = f"{sheet_id}!{start_col}{start_row}:{end_col}{end_row}"
-                                                              url = (f"{self.base_url}/open-apis/sheets/v2/spreadsheets/"
-                                                                     f"{spreadsheet_token}/values/{range_str}")
-                                                              resp = requests.get(url, headers=self._headers(),
-                                                                                  params={"valueRenderOption": "ToString"}, timeout=30)
-                                                              resp.raise_for_status()
-                                                              data = resp.json()
-                                                              if data.get("code") != 0:
-                                                                              raise Exception(f"Failed to read range {range_str}: {data}")
-                                                                          rows = data.get("data", {}).get("valueRange", {}).get("values", [])
+    def read_sheet_range(self, spreadsheet_token, sheet_id, start_col, end_col, start_row, end_row):
+        range_str = f"{sheet_id}!{start_col}{start_row}:{end_col}{end_row}"
+        url = (f"{self.base_url}/open-apis/sheets/v2/spreadsheets/"
+               f"{spreadsheet_token}/values/{range_str}")
+        resp = requests.get(url, headers=self._headers(),
+                            params={"valueRenderOption": "ToString"}, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("code") != 0:
+            raise Exception(f"Failed to read range {range_str}: {data}")
+        rows = data.get("data", {}).get("valueRange", {}).get("values", [])
         logger.info("Read %d raw rows from %s", len(rows), range_str)
         return rows
 
     def read_tracking_data(self, spreadsheet_token, sheet_id):
-                start_row = HEADER_ROW + 1
+        start_row = HEADER_ROW + 1
         rows = self.read_sheet_range(
-                        spreadsheet_token, sheet_id,
-                        start_col="A", end_col="Q",
-                        start_row=start_row, end_row=500,
+            spreadsheet_token, sheet_id,
+            start_col="A", end_col="Q",
+            start_row=start_row, end_row=500,
         )
-
         MIN_COLS = 17
         results = []
         last_shipment_id = ""
         last_tracking = ""
         last_carrier = ""
         last_num_boxes = ""
-
         for i, row in enumerate(rows):
-                        if not isinstance(row, list):
-                                            continue
+            if not isinstance(row, list):
+                continue
             while len(row) < MIN_COLS:
-                                row.append("")
-
+                row.append("")
             shipment_id_raw = str(row[0] or "").strip()
             tracking_raw = str(row[6] or "").strip()
             carrier_raw = str(row[7] or "").strip()
             num_boxes_raw = str(row[14] or "").strip()
-
             shipment_id = shipment_id_raw or last_shipment_id
             tracking = tracking_raw or last_tracking
             carrier = carrier_raw or last_carrier
             num_boxes = num_boxes_raw or last_num_boxes
-
             if shipment_id_raw:
-                                last_shipment_id = shipment_id_raw
+                last_shipment_id = shipment_id_raw
             if tracking_raw:
-                                last_tracking = tracking_raw
+                last_tracking = tracking_raw
             if carrier_raw:
-                                last_carrier = carrier_raw
+                last_carrier = carrier_raw
             if num_boxes_raw:
-                                last_num_boxes = num_boxes_raw
-
+                last_num_boxes = num_boxes_raw
             if not any(str(c or "").strip() for c in row):
-                                last_shipment_id = ""
+                last_shipment_id = ""
                 last_tracking = ""
                 last_carrier = ""
                 last_num_boxes = ""
                 continue
-
             if not tracking:
-                                continue
-
-            if not carrier:
-                                logger.warning(
-                                                        "  Row %d: tracking=%s but no carrier (even after carry-forward) - skipping",
-                                                        start_row + i, tracking,
-                                )
                 continue
-
+            if not carrier:
+                logger.warning(
+                    "  Row %d: tracking=%s but no carrier (even after carry-forward) - skipping",
+                    start_row + i, tracking,
+                )
+                continue
             status_raw = str(row[12] or "").strip()
             delivery_raw = str(row[16] or "").strip()
-
             results.append({
-                                "row_num": start_row + i,
-                                "shipment_id": shipment_id,
-                                "vendor": str(row[1] or "").strip(),
-                                "recipient": str(row[2] or "").strip(),
-                                "customer": str(row[4] or "").strip(),
-                                "order_num": str(row[3] or "").strip(),
-                                "tracking_num": tracking,
-                                "carrier": carrier,
-                                "num_boxes": num_boxes,
-                                "current_status": status_raw,
-                                "delivery_date": delivery_raw,
+                "row_num": start_row + i,
+                "shipment_id": shipment_id,
+                "vendor": str(row[1] or "").strip(),
+                "recipient": str(row[2] or "").strip(),
+                "customer": str(row[4] or "").strip(),
+                "order_num": str(row[3] or "").strip(),
+                "tracking_num": tracking,
+                "carrier": carrier,
+                "num_boxes": num_boxes,
+                "current_status": status_raw,
+                "delivery_date": delivery_raw,
             })
-
         logger.info("  %d rows with tracking in sheet %s", len(results), sheet_id)
         return results
 
     def write_cells(self, spreadsheet_token, sheet_id, updates):
-                if not updates:
-                                return
+        if not updates:
+            return
         value_ranges = []
         for u in updates:
-                        range_str = f"{sheet_id}!{u['col']}{u['row']}:{u['col']}{u['row']}"
+            range_str = f"{sheet_id}!{u['col']}{u['row']}:{u['col']}{u['row']}"
             value_ranges.append({"range": range_str, "values": [[u["value"]]]})
         url = (f"{self.base_url}/open-apis/sheets/v2/spreadsheets/"
-                              f"{spreadsheet_token}/values_batch_update")
+               f"{spreadsheet_token}/values_batch_update")
         resp = requests.post(url, headers=self._headers(),
-                                                          json={"valueRanges": value_ranges}, timeout=30)
+                             json={"valueRanges": value_ranges}, timeout=30)
         resp.raise_for_status()
         data = resp.json()
         if data.get("code") != 0:
-                        raise Exception(f"Failed to write cells: {data}")
+            raise Exception(f"Failed to write cells: {data}")
         logger.info("Updated %d cells in sheet %s", len(updates), sheet_id)
 
     def update_tracking_row(self, spreadsheet_token, sheet_id, row_num,
-                                                        status, delivery_date="", num_boxes=""):
-                                                                    """Update a tracking row using the Lark v2 dataValidation-aware write.
+                            status, delivery_date="", num_boxes=""):
+        """Update a tracking row using the Lark v2 dataValidation-aware write.
 
-                                                                            Status values MUST be one of the 4 dropdown options exactly:
-                                                                                        Label Created/Not Scanned, In Transit, Delivered, Exception/Delay
-                                                                                                """
-                                                                    updates = [{"row": row_num, "col": COLUMNS["status"], "value": status}]
-                                                                    if delivery_date:
-                                                                                    updates.append({"row": row_num, "col": COLUMNS["delivery_date"],
-                                                                                                                                "value": delivery_date})
-                                                                                if num_boxes:
-                                                                        updates.append({"row": row_num, "col": COLUMNS["num_boxes"],
-                                                                                                                    "value": str(num_boxes)})
-                                                                                            self.write_cells(spreadsheet_token, sheet_id, updates)
+        Status values MUST be one of the 4 dropdown options exactly:
+          Label Created/Not Scanned, In Transit, Delivered, Exception/Delay
+        """
+        updates = [{"row": row_num, "col": COLUMNS["status"], "value": status}]
+        if delivery_date:
+            updates.append({"row": row_num, "col": COLUMNS["delivery_date"], "value": delivery_date})
+        if num_boxes:
+            updates.append({"row": row_num, "col": COLUMNS["num_boxes"], "value": str(num_boxes)})
+        self.write_cells(spreadsheet_token, sheet_id, updates)
 
     # ------------------------------------------------------------------
     # Messaging
     # ------------------------------------------------------------------
 
     def send_group_message(self, message, chat_id=None, message_id=None):
-                """Send message to Lark group.  Falls back to plain text if card fails."""
+        """Send message to Lark group. Falls back to plain text if card fails."""
         target_chat = chat_id or LARK_CHAT_ID
         if not target_chat:
-                        logger.warning("No chat_id configured, skipping message")
+            logger.warning("No chat_id configured, skipping message")
             return
         try:
-                        self._send_card(message, target_chat, message_id)
+            self._send_card(message, target_chat, message_id)
             return
-except Exception as e:
+        except Exception as e:
             logger.warning("Interactive card failed (%s), retrying as plain text", e)
         try:
-                        self._send_text(message, target_chat, message_id)
-except Exception as e:
+            self._send_text(message, target_chat, message_id)
+        except Exception as e:
             logger.error("Plain text message also failed: %s", e)
             raise
 
     def _send_card(self, message, chat_id, message_id=None, card_json=None):
-                url = f"{self.base_url}/open-apis/im/v1/messages"
+        url = f"{self.base_url}/open-apis/im/v1/messages"
         params = {"receive_id_type": "chat_id"}
         content = card_json if card_json else self._build_card_message(message)
         body = {
-                        "receive_id": chat_id,
-                        "msg_type": "interactive",
-                        "content": content,
+            "receive_id": chat_id,
+            "msg_type": "interactive",
+            "content": content,
         }
         if message_id:
-                        url = f"{self.base_url}/open-apis/im/v1/messages/{message_id}/reply"
+            url = f"{self.base_url}/open-apis/im/v1/messages/{message_id}/reply"
             params = {}
             body = {"msg_type": "interactive", "content": content}
-        resp = requests.post(url, headers=self._headers(), params=params,
-                                                          json=body, timeout=30)
+        resp = requests.post(url, headers=self._headers(), params=params, json=body, timeout=30)
         resp.raise_for_status()
         data = resp.json()
         if data.get("code") != 0:
-                        raise Exception(f"Card send failed: code={data.get('code')} msg={data.get('msg')}")
+            raise Exception(f"Card send failed: code={data.get('code')} msg={data.get('msg')}")
         logger.info("Interactive card sent to group chat")
 
     def _send_text(self, message, chat_id, message_id=None):
-                url = f"{self.base_url}/open-apis/im/v1/messages"
+        url = f"{self.base_url}/open-apis/im/v1/messages"
         params = {"receive_id_type": "chat_id"}
         body = {
-                        "receive_id": chat_id,
-                        "msg_type": "text",
-                        "content": json.dumps({"text": message}),
+            "receive_id": chat_id,
+            "msg_type": "text",
+            "content": json.dumps({"text": message}),
         }
         if message_id:
-                        url = f"{self.base_url}/open-apis/im/v1/messages/{message_id}/reply"
+            url = f"{self.base_url}/open-apis/im/v1/messages/{message_id}/reply"
             params = {}
             body = {"msg_type": "text", "content": json.dumps({"text": message})}
-        resp = requests.post(url, headers=self._headers(), params=params,
-                                                          json=body, timeout=30)
+        resp = requests.post(url, headers=self._headers(), params=params, json=body, timeout=30)
         resp.raise_for_status()
         data = resp.json()
         if data.get("code") != 0:
-                        raise Exception(f"Text send failed: code={data.get('code')} msg={data.get('msg')}")
+            raise Exception(f"Text send failed: code={data.get('code')} msg={data.get('msg')}")
         logger.info("Plain text message sent to group chat")
 
     def _build_card_message(self, text_content):
-                card = {
-                                "config": {"wide_screen_mode": True},
-                                "header": {
-                                                    "title": {"tag": "plain_text", "content": "HLT Shipment Update"},
-                                                    "template": "blue",
-                                },
-                                "elements": [{"tag": "markdown", "content": text_content}],
-                }
+        card = {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "title": {"tag": "plain_text", "content": "HLT Shipment Update"},
+                "template": "blue",
+            },
+            "elements": [{"tag": "markdown", "content": text_content}],
+        }
         return json.dumps(card)
 
     def _build_alert_card(self, text_content):
-                """Red-banner card used for exception alerts."""
+        """Red-banner card used for exception alerts."""
         card = {
-                        "config": {"wide_screen_mode": True},
-                        "header": {
-                                            "title": {"tag": "plain_text", "content": "Shipment Alert"},
-                                            "template": "red",
-                        },
-                        "elements": [{"tag": "markdown", "content": text_content}],
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "title": {"tag": "plain_text", "content": "Shipment Alert"},
+                "template": "red",
+            },
+            "elements": [{"tag": "markdown", "content": text_content}],
         }
         return json.dumps(card)
 
@@ -319,64 +300,64 @@ except Exception as e:
 
     @staticmethod
     def _format_delivery_date_long(raw_date):
-                """Format a date as 'Thursday, March 26th 2026' style for the chat message."""
+        """Format a date as 'Thursday, March 26th 2026' style for the chat message."""
         if not raw_date:
-                        return ""
+            return ""
         clean = raw_date.strip()[:10]
         for fmt in ("%Y-%m-%d", "%m-%d-%Y", "%m/%d/%Y"):
-                        try:
-                                            dt = datetime.strptime(clean, fmt)
-                                            day = dt.day
-                                            if 11 <= day <= 13:
-                                                                    suffix = "th"
-elif day % 10 == 1:
-                                suffix = "st"
-elif day % 10 == 2:
-                    suffix = "nd"
-elif day % 10 == 3:
-                    suffix = "rd"
-else:
+            try:
+                dt = datetime.strptime(clean, fmt)
+                day = dt.day
+                if 11 <= day <= 13:
                     suffix = "th"
-                    return dt.strftime(f"%A, %B {day}{suffix} %Y")
-except (ValueError, TypeError):
-                    continue
-            return raw_date
+                elif day % 10 == 1:
+                    suffix = "st"
+                elif day % 10 == 2:
+                    suffix = "nd"
+                elif day % 10 == 3:
+                    suffix = "rd"
+                else:
+                    suffix = "th"
+                return dt.strftime(f"%A, %B {day}{suffix} %Y")
+            except (ValueError, TypeError):
+                continue
+        return raw_date
 
     @staticmethod
     def _format_delivery_date(raw_date):
-                if not raw_date:
-                                return ""
-                            for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%m/%d/%Y", "%m-%d-%Y"):
-                                            try:
-                                                                dt = datetime.strptime(raw_date.strip()[:10], fmt)
-                                                                return "expected delivery on " + dt.strftime("%A, %B %d, %Y").replace(" 0", " ")
-except (ValueError, TypeError):
+        if not raw_date:
+            return ""
+        for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%m/%d/%Y", "%m-%d-%Y"):
+            try:
+                dt = datetime.strptime(raw_date.strip()[:10], fmt)
+                return "expected delivery on " + dt.strftime("%A, %B %d, %Y").replace(" 0", " ")
+            except (ValueError, TypeError):
                 continue
         return raw_date
 
     @staticmethod
     def _format_date_short(raw_date):
-                if not raw_date:
-                                return ""
-                            try:
-                                            dt = datetime.strptime(raw_date[:10], "%Y-%m-%d")
-                                            return dt.strftime("%b %-d")
-except Exception:
+        if not raw_date:
+            return ""
+        try:
+            dt = datetime.strptime(raw_date[:10], "%Y-%m-%d")
+            return dt.strftime("%b %-d")
+        except Exception:
             return raw_date
 
     @staticmethod
     def _section_for(r):
-                token = r.get("sheet_token", "").strip()
+        token = r.get("sheet_token", "").strip()
         return SHEET_OWNERS.get(token, "Other")
 
     @staticmethod
     def _is_fully_delivered(r):
-                """Return True only when ALL boxes in a shipment are confirmed delivered."""
+        """Return True only when ALL boxes in a shipment are confirmed delivered."""
         packages = r.get("packages", [])
         status = r.get("new_status", "").upper()
         if packages:
-                        return all("DELIVERED" in p.get("status", "").upper() for p in packages)
-                    return status == "DELIVERED"
+            return all("DELIVERED" in p.get("status", "").upper() for p in packages)
+        return status == "DELIVERED"
 
     # ------------------------------------------------------------------
     # Shipment line formatting for the chat message
@@ -384,23 +365,24 @@ except Exception:
 
     @staticmethod
     def _shipment_line(r):
-                """Format one shipment line for the daily summary.
+        """Format one shipment line for the daily summary.
 
-                        Format:  tracking# -- customer -- last status / location -- delivery info
-                                Examples:
-                                            889865195237 -- Wildfang -- in transit in China - no estimated delivery date yet
-                                                        731780829017 -- Craftworks Design -- landed in California - estimated delivery date of Thursday, March 26th 2026
-                                                                """
+        Format: tracking# -- customer -- last status / location -- delivery info
+
+        Examples:
+          889865195237 -- Wildfang -- in transit in China - no estimated delivery date yet
+          731780829017 -- Craftworks Design -- landed in California - estimated delivery date of Thursday, March 26th 2026
+        """
         tracking = r.get("tracking_num", "N/A")
         customer = r.get("customer", "").strip()
         recipient = r.get("recipient", "").strip()
 
         # Determine the display name
         if recipient.upper() == "BRENDAN":
-                        name = "Brendan"
-elif recipient.upper() == "CUSTOMER DIRECT":
+            name = "Brendan"
+        elif recipient.upper() == "CUSTOMER DIRECT":
             name = customer or "Unknown"
-else:
+        else:
             name = customer or recipient or "Unknown"
 
         status = r.get("new_status", "").upper()
@@ -411,70 +393,68 @@ else:
 
         # ---- UPS multi-box: detailed per-box breakdown ----
         if packages and len(packages) > 1:
-                        total = len(packages)
-                        delivered = [p for p in packages if "DELIVERED" in p.get("status", "").upper()]
-                        in_transit = [p for p in packages
-                                      if p.get("scanned") and "DELIVERED" not in p.get("status", "").upper()]
-                        unscanned = [p for p in packages if not p.get("scanned")]
-                        n_del = len(delivered)
-                        n_it = len(in_transit)
-                        n_uns = len(unscanned)
-
+            total = len(packages)
+            delivered = [p for p in packages if "DELIVERED" in p.get("status", "").upper()]
+            in_transit = [p for p in packages if p.get("scanned") and "DELIVERED" not in p.get("status", "").upper()]
+            unscanned = [p for p in packages if not p.get("scanned")]
+            n_del = len(delivered)
+            n_it = len(in_transit)
+            n_uns = len(unscanned)
             parts = []
             if n_del:
-                                parts.append(f"{n_del} of {total} delivered")
-                            if n_it:
-                                                date_groups = defaultdict(int)
-                                                for p in in_transit:
-                                                                        d = p.get("delivery_date", "") or ""
-                                                                        date_groups[d] += 1
-                                                                    for date_str in sorted(date_groups):
-                                                                                            count = date_groups[date_str]
-                                                                                            label = LarkClient._format_date_short(date_str) if date_str else "no date"
-                                                                                            parts.append(f"{count} arriving {label}")
-                                                                                    if n_uns:
-                                                                                                        parts.append(f"{n_uns} not yet scanned")
-                                                                                                    if not parts:
-                                                                                                                        parts.append("in transit")
-                                                                                                                    box_summary = ", ".join(parts)
+                parts.append(f"{n_del} of {total} delivered")
+            if n_it:
+                date_groups = defaultdict(int)
+                for p in in_transit:
+                    d = p.get("delivery_date", "") or ""
+                    date_groups[d] += 1
+                for date_str in sorted(date_groups):
+                    count = date_groups[date_str]
+                    label = LarkClient._format_date_short(date_str) if date_str else "no date"
+                    parts.append(f"{count} arriving {label}")
+            if n_uns:
+                parts.append(f"{n_uns} not yet scanned")
+            if not parts:
+                parts.append("in transit")
+            box_summary = ", ".join(parts)
             return f"{tracking} ({total} boxes) -- {name} -- {box_summary}"
 
         # ---- Build status + location description ----
         if status == "DELIVERED":
-                        if delivery:
-                                            date_str = LarkClient._format_delivery_date_long(delivery)
+            if delivery:
+                date_str = LarkClient._format_delivery_date_long(delivery)
                 status_desc = f"delivered on {date_str}" if date_str else "delivered"
-else:
+            else:
                 status_desc = "delivered"
-elif status == "EXCEPTION/DELAY":
+        elif status == "EXCEPTION/DELAY":
             if raw_status:
                 status_desc = f"exception - {raw_status}"
-else:
+            else:
                 status_desc = "exception/delay"
-elif status == "LABEL CREATED/NOT SCANNED":
+        elif status == "LABEL CREATED/NOT SCANNED":
             status_desc = "label created - not yet scanned"
-else:
+        else:
             # IN TRANSIT or other
-                # Build a descriptive status with location
+            # Build a descriptive status with location
             if raw_status and location:
-                                status_desc = f"{raw_status.lower()} in {location}"
-elif location:
+                status_desc = f"{raw_status.lower()} in {location}"
+            elif location:
                 status_desc = f"in transit in {location}"
-elif raw_status:
+            elif raw_status:
                 status_desc = raw_status.lower()
-else:
+            else:
                 status_desc = "in transit"
 
         # ---- Build delivery date portion ----
         if status == "DELIVERED":
-                        date_desc = ""  # already included in status_desc
-elif delivery:
+            date_desc = ""  # already included in status_desc
+        elif delivery:
             date_long = LarkClient._format_delivery_date_long(delivery)
             date_desc = f" - estimated delivery date of {date_long}" if date_long else ""
-else:
+        else:
             if status not in ("DELIVERED", "LABEL CREATED/NOT SCANNED"):
-                                date_desc = " - no estimated delivery date yet"
-else:
+                date_desc = " - no estimated delivery date yet"
+            else:
                 date_desc = ""
 
         return f"{tracking} -- {name} -- {status_desc}{date_desc}"
@@ -484,73 +464,70 @@ else:
     # ------------------------------------------------------------------
 
     def send_daily_summary(self, all_results, chat_id=None, message_id=None):
-                """Send the shipment summary card to the Lark group chat.
+        """Send the shipment summary card to the Lark group chat.
 
-                        Format:
-                                    HLT Shipment Tracker
-                                                -- Hannah --
-                                                            FEDEX
-                                                                        tracking -- customer -- status/location -- delivery date
-                                                                                    ...
-                                                                                                UPS
-                                                                                                            ...
-                                                                                                                        -- Lucy --
-                                                                                                                                    ...
-                                                                                                                                                -- Other --
-                                                                                                                                                            ...
-                                                                                                                                                                    """
+        Format:
+            HLT Shipment Tracker
+            -- Hannah --
+            FEDEX
+            tracking -- customer -- status/location -- delivery date
+            ...
+            UPS
+            ...
+            -- Lucy --
+            ...
+            -- Other --
+            ...
+        """
         # Only show non-delivered shipments
         active = [r for r in all_results if not LarkClient._is_fully_delivered(r)]
-
         if not active:
-                        self.send_group_message(
-                                            "All shipments delivered. Nothing to track.",
-                                            chat_id=chat_id,
-                                            message_id=message_id,
-                        )
+            self.send_group_message(
+                "All shipments delivered. Nothing to track.",
+                chat_id=chat_id,
+                message_id=message_id,
+            )
             return
 
         # Deduplicate by tracking number
         seen, unique = set(), []
         for r in active:
-                        tn = r.get("tracking_num", "").strip()
+            tn = r.get("tracking_num", "").strip()
             if tn and tn not in seen:
-                                seen.add(tn)
+                seen.add(tn)
                 unique.append(r)
 
         # Group by sheet owner (Hannah / Lucy / Other)
         buckets = {tab: [] for tab in PERMANENT_TABS}
         for r in unique:
-                        section = self._section_for(r)
+            section = self._section_for(r)
             buckets[section].append(r)
 
         NL = chr(10)
         lines = ["**HLT Shipment Tracker**"]
 
         def render_section(label, items):
-                        lines.append(NL + f"**-- {label} --**")
+            lines.append(NL + f"**-- {label} --**")
             if not items:
-                                lines.append("No active shipments")
+                lines.append("No active shipments")
                 return
-
             # Sub-group by carrier
             by_carrier = {}
             for r in items:
-                                c = r.get("carrier", "").strip().upper() or "UNKNOWN"
+                c = r.get("carrier", "").strip().upper() or "UNKNOWN"
                 by_carrier.setdefault(c, []).append(r)
-
             for carrier in sorted(by_carrier):
-                                lines.append(NL + f"**{carrier}**")
+                lines.append(NL + f"**{carrier}**")
                 for r in by_carrier[carrier]:
-                                        lines.append(LarkClient._shipment_line(r))
+                    lines.append(LarkClient._shipment_line(r))
 
         for tab_name in PERMANENT_TABS:
-                        render_section(tab_name, buckets[tab_name])
+            render_section(tab_name, buckets[tab_name])
 
         self.send_group_message(
-                        NL.join(lines),
-                        chat_id=chat_id,
-                        message_id=message_id,
+            NL.join(lines),
+            chat_id=chat_id,
+            message_id=message_id,
         )
 
     # ------------------------------------------------------------------
@@ -558,25 +535,24 @@ else:
     # ------------------------------------------------------------------
 
     def send_exception_alerts(self, alerts, chat_id=None):
-                """Send a red-banner alert card for newly detected shipping exceptions."""
+        """Send a red-banner alert card for newly detected shipping exceptions."""
         target_chat = chat_id or LARK_CHAT_ID
         if not target_chat:
-                        logger.warning("No chat_id configured, skipping exception alerts")
+            logger.warning("No chat_id configured, skipping exception alerts")
             return
 
         MONTH_NAMES = [
-                        "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
-                        "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
+            "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+            "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
         ]
         now = datetime.now()
         current_month = MONTH_NAMES[now.month - 1]
 
         NL = chr(10)
-        lines = ["**HLT Shipment Alert**",
-                                  NL + "The following shipments need attention:"]
+        lines = ["**HLT Shipment Alert**", NL + "The following shipments need attention:"]
 
         for a in alerts:
-                        tracking = a.get("tracking_num", "N/A")
+            tracking = a.get("tracking_num", "N/A")
             carrier = a.get("carrier", "")
             name = a.get("name", "")
             tab = a.get("tab", "")
@@ -584,21 +560,21 @@ else:
             num_boxes = a.get("num_boxes", "").strip()
 
             if raw:
-                                detail = raw
-else:
+                detail = raw
+            else:
                 detail = a.get("new_status", "").title()
 
             if num_boxes and num_boxes != "1":
-                                box_tag = f" ({num_boxes} boxes)"
-elif num_boxes == "1":
+                box_tag = f" ({num_boxes} boxes)"
+            elif num_boxes == "1":
                 box_tag = " (1 box)"
-else:
+            else:
                 box_tag = ""
 
             tab_upper = tab.upper().strip()
             if tab_upper in MONTH_NAMES and tab_upper != current_month:
-                                month_tag = f" [{tab_upper}]"
-else:
+                month_tag = f" [{tab_upper}]"
+            else:
                 month_tag = ""
 
             line = f"- **{carrier}** {tracking}{box_tag} -- {name}{month_tag}: {detail}"
@@ -606,13 +582,12 @@ else:
 
         message = NL.join(lines)
         alert_card = self._build_alert_card(message)
-
         try:
-                        self._send_card("", target_chat, card_json=alert_card)
+            self._send_card("", target_chat, card_json=alert_card)
             logger.info("Exception alert card sent (%d alerts)", len(alerts))
-except Exception as e:
+        except Exception as e:
             logger.warning("Alert card failed (%s), sending as plain text", e)
             try:
-                                self._send_text(message, target_chat)
-except Exception as e2:
+                self._send_text(message, target_chat)
+            except Exception as e2:
                 logger.error("Exception alert plain text also failed: %s", e2)
