@@ -24,102 +24,104 @@ LARK_CHAT_ID = os.environ.get("LARK_CHAT_ID", "")
 # Comma-separated list of sheet tokens
 # Extract from URL: https://xxx.jp.larksuite.com/sheets/<SHEET_TOKEN>
 SHEET_TOKENS = [
-    t.strip()
-    for t in os.environ.get("LARK_SHEET_TOKENS", "").split(",")
-    if t.strip()
+        t.strip()
+        for t in os.environ.get("LARK_SHEET_TOKENS", "").split(",")
+        if t.strip()
 ]
 
 # =============================================================================
-# SHEET OWNERS — maps each sheet token to a display section (Hannah/Lucy/Other)
+# SHEET OWNERS -- maps each sheet token to a display section (Hannah/Lucy/Other)
 # =============================================================================
-# Format: "token1:Hannah,token2:Lucy"  (any token not listed falls to "Other")
+# Format: "token1:Hannah,token2:Lucy" (any token not listed falls to "Other")
 # Set via GitHub Secret: LARK_SHEET_OWNERS
 SHEET_OWNERS = {}
 for _entry in os.environ.get("LARK_SHEET_OWNERS", "").split(","):
-    _entry = _entry.strip()
-    if ":" in _entry:
-        _tok, _owner = _entry.split(":", 1)
-        SHEET_OWNERS[_tok.strip()] = _owner.strip()
+        _entry = _entry.strip()
+        if ":" in _entry:
+                    _tok, _owner = _entry.split(":", 1)
+                    SHEET_OWNERS[_tok.strip()] = _owner.strip()
 
-# =============================================================================
-# COLUMN MAPPING (letters A-Q)
-# =============================================================================
-COLUMNS = {
-    "shipment_id":   "A",
-    "vendor":        "B",
-    "recipient":     "C",
-    "order_num":     "D",
-    "customer":      "E",
-    "product_photo": "F",
-    "tracking_num":  "G",
-    "carrier":       "H",
-    "qty_shipped":   "I",
-    "qty_expected":  "J",
-    "discrepancy":   "K",
-    "balance_owed":  "L",
-    "status":        "M",
-    "tariff_charge": "N",
-    "num_boxes":     "O",
-    "notes":         "P",
-    "delivery_date": "Q",
-}
+    # =============================================================================
+    # COLUMN MAPPING (letters A-Q)
+    # =============================================================================
+    COLUMNS = {
+            "shipment_id": "A",
+            "vendor": "B",
+            "recipient": "C",
+            "order_num": "D",
+            "customer": "E",
+            "product_photo": "F",
+            "tracking_num": "G",
+            "carrier": "H",
+            "qty_shipped": "I",
+            "qty_expected": "J",
+            "discrepancy": "K",
+            "balance_owed": "L",
+            "status": "M",
+            "tariff_charge": "N",
+            "num_boxes": "O",
+            "notes": "P",
+            "delivery_date": "Q",
+    }
 
-# Header row (1-indexed) — data starts on the row after this
+# Header row (1-indexed) -- data starts on the row after this
 HEADER_ROW = 2
 
 # =============================================================================
 # CARRIER API CREDENTIALS
 # =============================================================================
-
-# FedEx — https://developer.fedex.com
+# FedEx -- https://developer.fedex.com
 FEDEX_API_KEY = os.environ.get("FEDEX_API_KEY", "")
 FEDEX_SECRET_KEY = os.environ.get("FEDEX_SECRET_KEY", "")
 
-# UPS — https://developer.ups.com
+# UPS -- https://developer.ups.com
 UPS_CLIENT_ID = os.environ.get("UPS_CLIENT_ID", "")
 UPS_CLIENT_SECRET = os.environ.get("UPS_CLIENT_SECRET", "")
 
-# DHL — https://developer.dhl.com (free tier)
+# DHL -- https://developer.dhl.com (free tier)
 DHL_API_KEY = os.environ.get("DHL_API_KEY", "")
 
 # =============================================================================
 # BOT SETTINGS
 # =============================================================================
+
 # Sheet tabs to skip
 SKIP_TABS = {"TEMPLATE"}
 
-# Carrier name normalization — maps values in sheet column H to API client keys
+# Carrier name normalization -- maps values in sheet column H to API client keys
 CARRIER_ALIASES = {
-    # FedEx
-    "fedex":             "fedex",
-    "fed ex":            "fedex",
-    "federal express":   "fedex",
-    # UPS
-    "ups":               "ups",
-    "united parcel":     "ups",
-    # USPS
-    "usps":              "usps",
-    "us postal":         "usps",
-    "united states postal": "usps",
-    # DHL
-    "dhl":               "dhl",
-    "dhl express":       "dhl",
-    # Royal Mail
-    "royal mail":        "royalmail",
-    "royalmail":         "royalmail",
-    "royal":             "royalmail",
-    "rm":                "royalmail",
+        # FedEx
+    "fedex": "fedex",
+        "fed ex": "fedex",
+        "federal express": "fedex",
+        # UPS
+        "ups": "ups",
+        "united parcel": "ups",
+        # USPS
+        "usps": "usps",
+        "us postal": "usps",
+        "united states postal": "usps",
+        # DHL
+        "dhl": "dhl",
+        "dhl express": "dhl",
+        # Royal Mail
+        "royal mail": "royalmail",
+        "royalmail": "royalmail",
+        "royal": "royalmail",
+        "rm": "royalmail",
 }
 
 # Status values the bot writes to the sheet (column M)
-# MUST match the 4 dropdown options in the Lark Sheet exactly
+# MUST match the dropdown options in the Lark Sheet exactly (title-case).
+# Writing values that don't match will overwrite the dropdown with plain text
+# and break the color-coded formatting.
 STATUS_MAP = {
-        "delivered":        "DELIVERED",
-        "in_transit":       "IN TRANSIT",
-        "out_for_delivery": "IN TRANSIT",
-        "exception":        "EXCEPTION/DELAY",
-        "pending":          "LABEL CREATED/NOT SCANNED",
-        "label_created":    "LABEL CREATED/NOT SCANNED",
-        "unknown":          "LABEL CREATED/NOT SCANNED",
-        "not_found":        "LABEL CREATED/NOT SCANNED",
+        "delivered": "Delivered",
+        "in_transit": "In Transit",
+        "out_for_delivery": "In Transit",
+        "exception": "Exception/Delay",
+        "pending": "Label Created/Not Scanned",
+        "label_created": "Label Created/Not Scanned",
+        "unknown": "Label Created/Not Scanned",
+        "not_found": "Label Created/Not Scanned",
 }
