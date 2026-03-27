@@ -12,6 +12,7 @@ Sheet structure note:
     on the FIRST row of each group - sub-rows leave them blank and inherit the
     values from the row above.  read_tracking_data() carries those fields forward.
 """
+
 import json
 import logging
 from collections import defaultdict
@@ -80,16 +81,20 @@ class LarkClient:
             data = resp.json()
             if data.get("code") == 0:
                 return self._parse_sheets(data.get("data", {}).get("sheets", []), spreadsheet_token)
-            logger.error("v3 code=%s msg=%s token=%s", data.get("code"), data.get("msg"), spreadsheet_token)
+            logger.error("v3 code=%s msg=%s token=%s",
+                         data.get("code"), data.get("msg"), spreadsheet_token)
         else:
-            logger.error("v3 HTTP %s token=%s body=%s", resp.status_code, spreadsheet_token, resp.text[:200])
+            logger.error("v3 HTTP %s token=%s body=%s",
+                         resp.status_code, spreadsheet_token, resp.text[:200])
+
         url_v2 = f"{self.base_url}/open-apis/sheets/v2/spreadsheets/{spreadsheet_token}/metainfo"
         resp2 = requests.get(url_v2, headers=self._headers(), timeout=30)
         if resp2.ok:
             data2 = resp2.json()
             if data2.get("code") == 0:
                 sheets_raw = data2.get("data", {}).get("sheets", [])
-                sheets = [{"title": s.get("title", ""), "sheet_id": s.get("sheetId", "")} for s in sheets_raw]
+                sheets = [{"title": s.get("title", ""), "sheet_id": s.get("sheetId", "")}
+                          for s in sheets_raw]
                 return self._parse_sheets(sheets, spreadsheet_token)
             raise Exception(
                 f"Cannot read spreadsheet {spreadsheet_token}: "
@@ -107,7 +112,8 @@ class LarkClient:
         logger.info("Found %d processable tabs in %s", len(result), spreadsheet_token)
         return result
 
-    def read_sheet_range(self, spreadsheet_token, sheet_id, start_col, end_col, start_row, end_row):
+    def read_sheet_range(self, spreadsheet_token, sheet_id, start_col, end_col,
+                         start_row, end_row):
         range_str = f"{sheet_id}!{start_col}{start_row}:{end_col}{end_row}"
         url = (f"{self.base_url}/open-apis/sheets/v2/spreadsheets/"
                f"{spreadsheet_token}/values/{range_str}")
@@ -128,25 +134,30 @@ class LarkClient:
             start_col="A", end_col="Q",
             start_row=start_row, end_row=500,
         )
+
         MIN_COLS = 17
         results = []
         last_shipment_id = ""
         last_tracking = ""
         last_carrier = ""
         last_num_boxes = ""
+
         for i, row in enumerate(rows):
             if not isinstance(row, list):
                 continue
             while len(row) < MIN_COLS:
                 row.append("")
+
             shipment_id_raw = str(row[0] or "").strip()
             tracking_raw = str(row[6] or "").strip()
             carrier_raw = str(row[7] or "").strip()
             num_boxes_raw = str(row[14] or "").strip()
+
             shipment_id = shipment_id_raw or last_shipment_id
             tracking = tracking_raw or last_tracking
             carrier = carrier_raw or last_carrier
             num_boxes = num_boxes_raw or last_num_boxes
+
             if shipment_id_raw:
                 last_shipment_id = shipment_id_raw
             if tracking_raw:
@@ -155,22 +166,27 @@ class LarkClient:
                 last_carrier = carrier_raw
             if num_boxes_raw:
                 last_num_boxes = num_boxes_raw
+
             if not any(str(c or "").strip() for c in row):
                 last_shipment_id = ""
                 last_tracking = ""
                 last_carrier = ""
                 last_num_boxes = ""
                 continue
+
             if not tracking:
                 continue
+
             if not carrier:
                 logger.warning(
                     "  Row %d: tracking=%s but no carrier (even after carry-forward) - skipping",
                     start_row + i, tracking,
                 )
                 continue
+
             status_raw = str(row[12] or "").strip()
             delivery_raw = str(row[16] or "").strip()
+
             results.append({
                 "row_num": start_row + i,
                 "shipment_id": shipment_id,
@@ -184,6 +200,7 @@ class LarkClient:
                 "current_status": status_raw,
                 "delivery_date": delivery_raw,
             })
+
         logger.info("  %d rows with tracking in sheet %s", len(results), sheet_id)
         return results
 
@@ -205,18 +222,21 @@ class LarkClient:
         logger.info("Updated %d cells in sheet %s", len(updates), sheet_id)
 
     def update_tracking_row(self, spreadsheet_token, sheet_id, row_num,
-                            status, delivery_date="", num_boxes=""):
-        """Update a tracking row using the Lark v2 dataValidation-aware write.
+                            delivery_date="", num_boxes=""):
+        """Update delivery date and num_boxes for a tracking row.
 
-        Status values MUST be one of the 4 dropdown options exactly:
-          Label Created/Not Scanned, In Transit, Delivered, Exception/Delay
+        NOTE: We intentionally do NOT write to the status column (M).
+        The Lark values_batch_update API writes plain text which overwrites
+        the dropdown widget and destroys the color-coded formatting.
+        Users manage the status dropdown manually.
         """
-        updates = [{"row": row_num, "col": COLUMNS["status"], "value": status}]
+        updates = []
         if delivery_date:
             updates.append({"row": row_num, "col": COLUMNS["delivery_date"], "value": delivery_date})
         if num_boxes:
             updates.append({"row": row_num, "col": COLUMNS["num_boxes"], "value": str(num_boxes)})
-        self.write_cells(spreadsheet_token, sheet_id, updates)
+        if updates:
+            self.write_cells(spreadsheet_token, sheet_id, updates)
 
     # ------------------------------------------------------------------
     # Messaging
@@ -375,7 +395,6 @@ class LarkClient:
         """Format one shipment line for the daily summary.
 
         Format: • **tracking#** -- customer -- last status / location -- delivery info
-
         Tracking numbers are bold.  Each line is a bullet point.
         """
         tracking = r.get("tracking_num", "N/A")
@@ -400,7 +419,8 @@ class LarkClient:
         if packages and len(packages) > 1:
             total = len(packages)
             delivered = [p for p in packages if "DELIVERED" in p.get("status", "").upper()]
-            in_transit = [p for p in packages if p.get("scanned") and "DELIVERED" not in p.get("status", "").upper()]
+            in_transit = [p for p in packages if p.get("scanned")
+                          and "DELIVERED" not in p.get("status", "").upper()]
             unscanned = [p for p in packages if not p.get("scanned")]
             n_del = len(delivered)
             n_it = len(in_transit)
@@ -487,9 +507,8 @@ class LarkClient:
         active = [r for r in all_results if not LarkClient._is_fully_delivered(r)]
         if not active:
             self.send_group_message(
-                "All shipments delivered. Nothing to track.",
-                chat_id=chat_id,
-                message_id=message_id,
+                "All shipments delivered.  Nothing to track.",
+                chat_id=chat_id, message_id=message_id,
             )
             return
 
@@ -532,8 +551,7 @@ class LarkClient:
 
         self.send_group_message(
             NL.join(lines),
-            chat_id=chat_id,
-            message_id=message_id,
+            chat_id=chat_id, message_id=message_id,
         )
 
     # ------------------------------------------------------------------
@@ -555,7 +573,8 @@ class LarkClient:
         current_month = MONTH_NAMES[now.month - 1]
 
         NL = chr(10)
-        lines = ["**HLT Shipment Alert**", NL + "The following shipments need attention:"]
+        lines = ["**HLT Shipment Alert**",
+                 NL + "The following shipments need attention:"]
 
         for a in alerts:
             tracking = a.get("tracking_num", "N/A")
@@ -588,6 +607,7 @@ class LarkClient:
 
         message = NL.join(lines)
         alert_card = self._build_alert_card(message)
+
         try:
             self._send_card("", target_chat, card_json=alert_card)
             logger.info("Exception alert card sent (%d alerts)", len(alerts))
