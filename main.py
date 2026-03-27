@@ -21,9 +21,9 @@ Scheduling:
     main() ensures only one run executes per scheduled window (45-min window).
 
 Usage:
-        python main.py                # Run once (full summary)
-        python main.py --dry-run      # No writes or messages
-        python main.py --force        # Skip time-window check (for manual runs)
+    python main.py                  # Run once (full summary)
+    python main.py --dry-run        # No writes or messages
+    python main.py --force          # Skip time-window check (for manual runs)
 """
 
 import sys
@@ -85,7 +85,6 @@ STATUS_NORMALIZE = {
     "pre-shipment": "Label Created/Not Scanned",
     "unknown": "Label Created/Not Scanned",
     "not_found": "Label Created/Not Scanned",
-    "not found": "Label Created/Not Scanned",
 }
 
 
@@ -110,16 +109,18 @@ def _to_dropdown(status_str):
 
 
 def validate_and_fix_rows(lark, spreadsheet_token, sheet_id, rows):
+    """Fix delivery date formatting only.
+
+    NOTE: We no longer write to the status column (M) here.
+    Writing plain text to column M overwrites the Lark dropdown widget
+    and destroys the color-coded formatting.  Status is now read-only
+    from the bot's perspective -- users manage it via the dropdown.
+    """
     fixes = []
     for row_data in rows:
         row_num = row_data["row_num"]
-        status = row_data.get("current_status", "").strip()
-        if status:
-            correct = _to_dropdown(status)
-            if status != correct:
-                fixes.append({"row": row_num, "col": COLUMNS["status"], "value": correct})
-                row_data["current_status"] = correct
-                logger.info("  Row %d status fix: '%s' -> '%s'", row_num, status, correct)
+
+        # --- Delivery date formatting only ---
         raw_date = row_data.get("delivery_date", "").strip()
         if raw_date:
             fixed_date = _fmt_date(raw_date)
@@ -127,6 +128,7 @@ def validate_and_fix_rows(lark, spreadsheet_token, sheet_id, rows):
                 fixes.append({"row": row_num, "col": COLUMNS["delivery_date"], "value": fixed_date})
                 row_data["delivery_date"] = fixed_date
                 logger.info("  Row %d date fix: '%s' -> '%s'", row_num, raw_date, fixed_date)
+
     if fixes:
         try:
             lark.write_cells(spreadsheet_token, sheet_id, fixes)
@@ -216,11 +218,9 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
 
     target_tabs = tabs_to_scan()
     tabs_to_process = [t for t in tabs if t["title"] in target_tabs]
-
     if not tabs_to_process:
         logger.warning("No matching tabs in %s. Want: %s. Have: %s",
-                       spreadsheet_token, sorted(target_tabs),
-                       [t["title"] for t in tabs])
+                        spreadsheet_token, sorted(target_tabs), [t["title"] for t in tabs])
         return all_results
 
     logger.info("Scanning %s in %s",
@@ -232,6 +232,7 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
         tab_title = tab["title"]
         sheet_id = tab["sheet_id"]
         logger.info("  Tab: %s (%s)", tab_title, sheet_id)
+
         try:
             rows = lark.read_tracking_data(spreadsheet_token, sheet_id)
         except Exception as e:
@@ -250,15 +251,22 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
 
             if current_status in DONE_STATUSES:
                 continue
+
             if tracking_num in sibling_skip:
                 continue
 
             carrier = normalize_carrier(carrier_raw)
             if not carrier or carrier not in CARRIER_ALIASES.values():
-                logger.warning("  Row %d: unknown carrier '%s'", row["row_num"], carrier_raw)
-                all_results.append({**row, "new_status": current_status or "Label Created/Not Scanned",
-                                    "location": "", "packages": [], "tab": tab_title,
-                                    "sheet_token": spreadsheet_token})
+                logger.warning("  Row %d: unknown carrier '%s'",
+                               row["row_num"], carrier_raw)
+                all_results.append({
+                    **row,
+                    "new_status": current_status or "Label Created/Not Scanned",
+                    "location": "",
+                    "packages": [],
+                    "tab": tab_title,
+                    "sheet_token": spreadsheet_token,
+                })
                 continue
 
             result = tracker.track(tracking_num, carrier)
@@ -279,28 +287,44 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
                 display_status = current_status if current_status else "Label Created/Not Scanned"
                 logger.warning("  %s: API error (%s), keeping '%s'",
                                tracking_num, str(api_error)[:60], display_status)
-                all_results.append({**row, "new_status": display_status,
-                                    "delivery_date": row.get("delivery_date", ""),
-                                    "raw_status": raw_status, "location": location,
-                                    "packages": packages, "tab": tab_title,
-                                    "sheet_token": spreadsheet_token})
+                all_results.append({
+                    **row,
+                    "new_status": display_status,
+                    "delivery_date": row.get("delivery_date", ""),
+                    "raw_status": raw_status,
+                    "location": location,
+                    "packages": packages,
+                    "tab": tab_title,
+                    "sheet_token": spreadsheet_token,
+                })
             else:
-                dropdown_status = _to_dropdown(new_status)
-                current_dropdown = _to_dropdown(current_status) if current_status else ""
-                if not dry_run and dropdown_status != current_dropdown:
+                # --- Always update delivery date and num_boxes ---
+                # We no longer write to the status column (M) to preserve
+                # the Lark dropdown widget and its color-coded formatting.
+                # The bot still uses the carrier status for the chat message.
+                if not dry_run:
                     try:
                         num_boxes = str(len(packages)) if packages else ""
-                        lark.update_tracking_row(spreadsheet_token, sheet_id,
-                                                 row["row_num"], dropdown_status,
-                                                 delivery_date, num_boxes)
-                        logger.info("  Updated %s: %s -> %s",
-                                    tracking_num, current_status, dropdown_status)
+                        lark.update_tracking_row(
+                            spreadsheet_token, sheet_id, row["row_num"],
+                            delivery_date, num_boxes,
+                        )
+                        logger.info("  Updated %s: delivery=%s boxes=%s",
+                                    tracking_num, delivery_date or "(none)", num_boxes or "(none)")
                     except Exception as e:
                         logger.error("  Failed to write row %d: %s", row["row_num"], e)
-                all_results.append({**row, "new_status": new_status,
-                                    "delivery_date": delivery_date, "raw_status": raw_status,
-                                    "location": location, "packages": packages,
-                                    "tab": tab_title, "sheet_token": spreadsheet_token})
+
+                all_results.append({
+                    **row,
+                    "new_status": new_status,
+                    "delivery_date": delivery_date,
+                    "raw_status": raw_status,
+                    "location": location,
+                    "packages": packages,
+                    "tab": tab_title,
+                    "sheet_token": spreadsheet_token,
+                })
+
             time.sleep(0.5)
 
     return all_results
@@ -310,16 +334,20 @@ def run_tracker(dry_run=False, chat_id=None, message_id=None):
     if not SHEET_TOKENS:
         logger.error("No sheet tokens configured. Set LARK_SHEET_TOKENS env var.")
         return []
+
     logger.info("Tabs to scan: %s", sorted(tabs_to_scan()))
     lark = LarkClient()
     tracker = CarrierTracker()
     all_results = []
+
     for token in SHEET_TOKENS:
         logger.info("Processing spreadsheet: %s", token)
         results = process_sheet(lark, tracker, token, dry_run)
         all_results.extend(results)
         logger.info("  -> %d active shipments from %s", len(results), token)
+
     logger.info("Total active shipments: %d", len(all_results))
+
     if not dry_run:
         try:
             lark.send_daily_summary(all_results, chat_id=chat_id, message_id=message_id)
@@ -331,8 +359,8 @@ def run_tracker(dry_run=False, chat_id=None, message_id=None):
         for r in all_results:
             logger.info("  [%s] %s | %s | %s | %s | %s",
                         r.get("tab"), r["tracking_num"], r["carrier"],
-                        r["new_status"], r.get("delivery_date", ""),
-                        r.get("customer", ""))
+                        r["new_status"], r.get("delivery_date", ""), r.get("customer", ""))
+
     return all_results
 
 
@@ -340,15 +368,19 @@ def main():
     try:
         dry_run = "--dry-run" in sys.argv
         force = "--force" in sys.argv
+
         if dry_run:
             logger.info("=== DRY RUN MODE - no writes or messages ===")
             run_tracker(dry_run=True)
             logger.info("Done!")
             return
+
         now_et = _eastern_now()
         logger.info("Running at ET time: %s", now_et.strftime("%Y-%m-%d %H:%M %Z"))
+
         run_tracker(dry_run=False)
         logger.info("Done!")
+
     except Exception as e:
         logger.error("Fatal error in main: %s", e, exc_info=True)
 
