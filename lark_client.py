@@ -34,6 +34,13 @@ logger = logging.getLogger(__name__)
 
 PERMANENT_TABS = ["Hannah", "Lucy", "Other"]
 
+# Display names for section headers (uppercase style)
+SECTION_DISPLAY = {
+    "Hannah": "HANNAH",
+    "Lucy": "LUCY",
+    "Other": "OTHER",
+}
+
 
 class LarkClient:
     """Client for Lark Suite API (Sheets + Messaging)."""
@@ -367,11 +374,9 @@ class LarkClient:
     def _shipment_line(r):
         """Format one shipment line for the daily summary.
 
-        Format: tracking# -- customer -- last status / location -- delivery info
+        Format: • **tracking#** -- customer -- last status / location -- delivery info
 
-        Examples:
-          889865195237 -- Wildfang -- in transit in China - no estimated delivery date yet
-          731780829017 -- Craftworks Design -- landed in California - estimated delivery date of Thursday, March 26th 2026
+        Tracking numbers are bold.  Each line is a bullet point.
         """
         tracking = r.get("tracking_num", "N/A")
         customer = r.get("customer", "").strip()
@@ -417,7 +422,7 @@ class LarkClient:
             if not parts:
                 parts.append("in transit")
             box_summary = ", ".join(parts)
-            return f"{tracking} ({total} boxes) -- {name} -- {box_summary}"
+            return f"• **{tracking}** ({total} boxes) -- {name} -- {box_summary}"
 
         # ---- Build status + location description ----
         if status == "DELIVERED":
@@ -435,7 +440,6 @@ class LarkClient:
             status_desc = "label created - not yet scanned"
         else:
             # IN TRANSIT or other
-            # Build a descriptive status with location
             if raw_status and location:
                 status_desc = f"{raw_status.lower()} in {location}"
             elif location:
@@ -447,7 +451,7 @@ class LarkClient:
 
         # ---- Build delivery date portion ----
         if status == "DELIVERED":
-            date_desc = ""  # already included in status_desc
+            date_desc = ""
         elif delivery:
             date_long = LarkClient._format_delivery_date_long(delivery)
             date_desc = f" - estimated delivery date of {date_long}" if date_long else ""
@@ -457,7 +461,7 @@ class LarkClient:
             else:
                 date_desc = ""
 
-        return f"{tracking} -- {name} -- {status_desc}{date_desc}"
+        return f"• **{tracking}** -- {name} -- {status_desc}{date_desc}"
 
     # ------------------------------------------------------------------
     # Daily summary
@@ -468,15 +472,15 @@ class LarkClient:
 
         Format:
             HLT Shipment Tracker
-            -- Hannah --
-            FEDEX
-            tracking -- customer -- status/location -- delivery date
+            -- HANNAH --
+            __FEDEX__
+            • **tracking** -- customer -- status/location -- delivery date
             ...
-            UPS
+            __UPS__
             ...
-            -- Lucy --
+            -- LUCY --
             ...
-            -- Other --
+            -- OTHER --
             ...
         """
         # Only show non-delivered shipments
@@ -507,7 +511,8 @@ class LarkClient:
         lines = ["**HLT Shipment Tracker**"]
 
         def render_section(label, items):
-            lines.append(NL + f"**-- {label} --**")
+            display = SECTION_DISPLAY.get(label, label.upper())
+            lines.append(NL + f"**-- {display} --**")
             if not items:
                 lines.append("No active shipments")
                 return
@@ -517,7 +522,8 @@ class LarkClient:
                 c = r.get("carrier", "").strip().upper() or "UNKNOWN"
                 by_carrier.setdefault(c, []).append(r)
             for carrier in sorted(by_carrier):
-                lines.append(NL + f"**{carrier}**")
+                # Underline carrier names using Lark markdown <u> tag
+                lines.append(NL + f"<u>{carrier}</u>")
                 for r in by_carrier[carrier]:
                     lines.append(LarkClient._shipment_line(r))
 
@@ -577,7 +583,7 @@ class LarkClient:
             else:
                 month_tag = ""
 
-            line = f"- **{carrier}** {tracking}{box_tag} -- {name}{month_tag}: {detail}"
+            line = f"• **{carrier}** {tracking}{box_tag} -- {name}{month_tag}: {detail}"
             lines.append(line)
 
         message = NL.join(lines)
