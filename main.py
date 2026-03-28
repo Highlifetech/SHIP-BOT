@@ -311,6 +311,12 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
                         )
                         logger.info("  Updated %s: delivery=%s boxes=%s",
                                     tracking_num, delivery_date or "(none)", num_boxes or "(none)")
+                        # Apply background color to the Status cell (col M) to match
+                        # the dropdown option color -- without overwriting the dropdown value.
+                        display_status = _to_dropdown(new_status)
+                        lark.set_status_cell_style(
+                            spreadsheet_token, sheet_id, row["row_num"], display_status
+                        )
                     except Exception as e:
                         logger.error("  Failed to write row %d: %s", row["row_num"], e)
 
