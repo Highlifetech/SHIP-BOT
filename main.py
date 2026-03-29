@@ -327,34 +327,42 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
 
             time.sleep(0.5)
 
-        # ---- Batch-apply conditional formatting to EVERY row in this tab ----
-        # Iterates the full raw rows list (all rows read from the sheet),
-        # so DELIVERED, sibling-skip, and unknown-carrier rows are all colored.
-        # For rows that were actively tracked, uses the fresh API status.
+        # ---- Batch-apply conditional formatting to ALL status rows in this tab ----
+        # Uses read_all_status_rows() which returns EVERY row with a non-empty
+        # status in column M -- including Hannah/Lucy/Other rows that have no
+        # tracking number and would be missed by the tracking-only rows list.
+        # For rows that were actively tracked this run, uses the fresh API status.
         if not dry_run:
             # Build a lookup: row_num -> new_status for rows we actively tracked
             tracked_status = {}
             for r in all_results:
                 if r.get("tab") == tab_title and r.get("sheet_token") == spreadsheet_token:
                     tracked_status[r["row_num"]] = r.get("new_status", "") or r.get("current_status", "")
+            # Read ALL rows that have any status value (covers Hannah/Lucy/Other
+            # rows with no tracking number, plus all Delivered/sibling rows)
+            try:
+                all_status_rows = lark.read_all_status_rows(spreadsheet_token, sheet_id)
+            except Exception as e:
+                logger.error("  Failed to read all status rows for tab '%s': %s", tab_title, e)
+                all_status_rows = rows  # fall back to tracking rows only
             style_pairs = []
-            for r in rows:
+            for r in all_status_rows:
                 row_num = r["row_num"]
                 if row_num in tracked_status:
                     status_raw = tracked_status[row_num]
                 else:
-                    # Delivered / sibling / untracked -- use current sheet value
+                    # Delivered / sibling / untracked / non-tracking rows -- use current sheet value
                     status_raw = r.get("current_status", "")
-                display = _to_dropdown(status_raw)
-                style_pairs.append((row_num, display))
+                if status_raw:
+                    display = _to_dropdown(status_raw)
+                    style_pairs.append((row_num, display))
             if style_pairs:
                 try:
                     lark.set_status_styles_batch(spreadsheet_token, sheet_id, style_pairs)
                     logger.info("  Styled %d status cells in tab '%s'", len(style_pairs), tab_title)
                 except Exception as e:
                     logger.error("  Batch style failed for tab '%s': %s", tab_title, e)
-
-    return all_results
+            return all_results
 
 
 def run_tracker(dry_run=False, chat_id=None, message_id=None):
