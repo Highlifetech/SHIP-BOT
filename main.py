@@ -362,7 +362,37 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
                     logger.info("  Styled %d status cells in tab '%s'", len(style_pairs), tab_title)
                 except Exception as e:
                     logger.error("  Batch style failed for tab '%s': %s", tab_title, e)
-            return all_results
+
+
+    # ---- Style ALL remaining tabs (historical months not in scan window) ----
+    # These tabs were not tracked this run but still need color styling.
+    # We read their status column and apply colors based on current sheet values.
+    if not dry_run:
+        styled_tab_ids = {t["sheet_id"] for t in tabs_to_process}
+        for tab in tabs:
+            if tab["sheet_id"] in styled_tab_ids:
+                continue  # already styled above
+            tab_title = tab["title"]
+            sheet_id = tab["sheet_id"]
+            try:
+                all_status_rows = lark.read_all_status_rows(spreadsheet_token, sheet_id)
+            except Exception as e:
+                logger.error("  Failed to read status rows for tab '%s': %s", tab_title, e)
+                continue
+            style_pairs = []
+            for r in all_status_rows:
+                status_raw = r.get("current_status", "")
+                if status_raw:
+                    display = _to_dropdown(status_raw)
+                    style_pairs.append((r["row_num"], display))
+            if style_pairs:
+                try:
+                    lark.set_status_styles_batch(spreadsheet_token, sheet_id, style_pairs)
+                    logger.info("  Styled %d status cells in tab '%s'", len(style_pairs), tab_title)
+                except Exception as e:
+                    logger.error("  Batch style failed for tab '%s': %s", tab_title, e)
+
+    return all_results
 
 
 def run_tracker(dry_run=False, chat_id=None, message_id=None):
