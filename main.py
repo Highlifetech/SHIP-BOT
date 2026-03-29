@@ -327,16 +327,26 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
 
             time.sleep(0.5)
 
-        # ---- Batch-apply conditional formatting to ALL rows in this tab ----
-        # Runs after tracking every row, covering ALL branches: successful API,
-        # API error (kept current status), unknown carrier, etc.
+        # ---- Batch-apply conditional formatting to EVERY row in this tab ----
+        # Iterates the full raw rows list (all rows read from the sheet),
+        # so DELIVERED, sibling-skip, and unknown-carrier rows are all colored.
+        # For rows that were actively tracked, uses the fresh API status.
         if not dry_run:
-            tab_results = [r for r in all_results if r.get("tab") == tab_title and r.get("sheet_token") == spreadsheet_token]
+            # Build a lookup: row_num -> new_status for rows we actively tracked
+            tracked_status = {}
+            for r in all_results:
+                if r.get("tab") == tab_title and r.get("sheet_token") == spreadsheet_token:
+                    tracked_status[r["row_num"]] = r.get("new_status", "") or r.get("current_status", "")
             style_pairs = []
-            for r in tab_results:
-                status_raw = r.get("new_status", "") or r.get("current_status", "")
+            for r in rows:
+                row_num = r["row_num"]
+                if row_num in tracked_status:
+                    status_raw = tracked_status[row_num]
+                else:
+                    # Delivered / sibling / untracked -- use current sheet value
+                    status_raw = r.get("current_status", "")
                 display = _to_dropdown(status_raw)
-                style_pairs.append((r["row_num"], display))
+                style_pairs.append((row_num, display))
             if style_pairs:
                 try:
                     lark.set_status_styles_batch(spreadsheet_token, sheet_id, style_pairs)
