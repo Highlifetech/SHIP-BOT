@@ -311,12 +311,6 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
                         )
                         logger.info("  Updated %s: delivery=%s boxes=%s",
                                     tracking_num, delivery_date or "(none)", num_boxes or "(none)")
-                        # Apply background color to the Status cell (col M) to match
-                        # the dropdown option color -- without overwriting the dropdown value.
-                        display_status = _to_dropdown(new_status)
-                        lark.set_status_cell_style(
-                            spreadsheet_token, sheet_id, row["row_num"], display_status
-                        )
                     except Exception as e:
                         logger.error("  Failed to write row %d: %s", row["row_num"], e)
 
@@ -332,6 +326,23 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
                 })
 
             time.sleep(0.5)
+
+        # ---- Batch-apply conditional formatting to ALL rows in this tab ----
+        # Runs after tracking every row, covering ALL branches: successful API,
+        # API error (kept current status), unknown carrier, etc.
+        if not dry_run:
+            tab_results = [r for r in all_results if r.get("tab") == tab_title and r.get("sheet_token") == spreadsheet_token]
+            style_pairs = []
+            for r in tab_results:
+                status_raw = r.get("new_status", "") or r.get("current_status", "")
+                display = _to_dropdown(status_raw)
+                style_pairs.append((r["row_num"], display))
+            if style_pairs:
+                try:
+                    lark.set_status_styles_batch(spreadsheet_token, sheet_id, style_pairs)
+                    logger.info("  Styled %d status cells in tab '%s'", len(style_pairs), tab_title)
+                except Exception as e:
+                    logger.error("  Batch style failed for tab '%s': %s", tab_title, e)
 
     return all_results
 
