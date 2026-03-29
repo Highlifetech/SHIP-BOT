@@ -242,17 +242,19 @@ class LarkClient:
     # ------------------------------------------------------------------
     # Conditional formatting (cell background color)
     # ------------------------------------------------------------------
-    # Maps each shipping status value to an RGB background color.
-    # These match the colors visible in the Lark Sheet dropdown:
-    #   LABEL CREATED/NOT SCANNED -> Red     #F85549 / rgb(248,85,73)
-    #   IN TRANSIT                -> Yellow  #FAAD14 / rgb(250,173,20)
-    #   DELIVERED                 -> Green   #34A853 / rgb(52,168,83)
-    #   EXCEPTION/DELAY           -> Orange  #FF7A28 / rgb(255,122,40)
+    # Background hex colors for the Status cell (column M).
+    # Applied via styles_batch_update which sets color WITHOUT touching
+    # the cell value, so the dropdown widget is fully preserved.
+    #
+    #   Label Created/Not Scanned  ->  Light Red   #FF6B6B
+    #   In Transit                 ->  Blue        #1677FF
+    #   Delivered                  ->  Green       #00B96B
+    #   Exception/Delay            ->  Orange      #FA8C16
     STATUS_CELL_COLORS = {
-        "Label Created/Not Scanned": {"red": 0.972, "green": 0.333, "blue": 0.286},
-        "In Transit":                {"red": 0.980, "green": 0.678, "blue": 0.078},
-        "Delivered":                 {"red": 0.204, "green": 0.659, "blue": 0.325},
-        "Exception/Delay":           {"red": 1.000, "green": 0.478, "blue": 0.157},
+        "Label Created/Not Scanned": "#FF6B6B",  # light red
+        "In Transit":                "#1677FF",  # blue
+        "Delivered":                 "#00B96B",  # strong green
+        "Exception/Delay":           "#FA8C16",  # orange
     }
 
     def set_status_cell_style(self, spreadsheet_token, sheet_id, row_num, status_value):
@@ -261,21 +263,43 @@ class LarkClient:
         Uses the Lark Sheets styles_batch_update API which sets cell formatting
         WITHOUT overwriting the cell value, so the dropdown widget and its
         selected option are both preserved.
-
-        Args:
-            spreadsheet_token: The Lark spreadsheet token
-            sheet_id: The sheet tab ID
-            row_num: 1-indexed row number
-            status_value: One of the four canonical status strings
         """
-        color = self.STATUS_CELL_COLORS.get(status_value)
-        if not color:
+        color_hex = self.STATUS_CELL_COLORS.get(status_value)
+        if not color_hex:
             logger.warning(
                 "set_status_cell_style: unknown status '%s', skipping", status_value
             )
             return
-
         range_str = f"{sheet_id}!M{row_num}:M{row_num}"
+        self._apply_cell_background(spreadsheet_token, [range_str], color_hex)
+
+    def set_status_styles_batch(self, spreadsheet_token, sheet_id, row_status_pairs):
+        """Apply background colors to multiple Status cells in a single API call.
+
+        Args:
+            spreadsheet_token: The Lark spreadsheet token
+            sheet_id: The sheet tab ID
+            row_status_pairs: list of (row_num, status_value) tuples
+        """
+        if not row_status_pairs:
+            return
+        # Group rows by color so we can batch ranges with the same color
+        by_color = {}
+        for row_num, status_value in row_status_pairs:
+            color_hex = self.STATUS_CELL_COLORS.get(status_value)
+            if not color_hex:
+                logger.warning(
+                    "set_status_styles_batch: unknown status '%s' for row %d, skipping",
+                    status_value, row_num,
+                )
+                continue
+            by_color.setdefault(color_hex, []).append(f"{sheet_id}!M{row_num}:M{row_num}")
+
+        for color_hex, ranges in by_color.items():
+            self._apply_cell_background(spreadsheet_token, ranges, color_hex)
+
+    def _apply_cell_background(self, spreadsheet_token, ranges, color_hex):
+        """Call styles_batch_update to set background color on the given ranges."""
         url = (
             f"{self.base_url}/open-apis/sheets/v2/spreadsheets/"
             f"{spreadsheet_token}/styles_batch_update"
@@ -283,14 +307,8 @@ class LarkClient:
         payload = {
             "data": [
                 {
-                    "ranges": [range_str],
-                    "style": {
-                        "backColor": "#{:02X}{:02X}{:02X}".format(
-                            int(color["red"] * 255),
-                            int(color["green"] * 255),
-                            int(color["blue"] * 255),
-                        ),
-                    },
+                    "ranges": ranges,
+                    "style": {"backColor": color_hex},
                 }
             ]
         }
@@ -302,22 +320,15 @@ class LarkClient:
             data = resp.json()
             if data.get("code") != 0:
                 logger.error(
-                    "styles_batch_update failed for row %d status '%s': code=%s msg=%s",
-                    row_num, status_value, data.get("code"), data.get("msg"),
+                    "styles_batch_update failed for ranges %s color %s: code=%s msg=%s",
+                    ranges, color_hex, data.get("code"), data.get("msg"),
                 )
             else:
                 logger.info(
-                    "Cell M%d styled for status '%s' (color #%02X%02X%02X)",
-                    row_num, status_value,
-                    int(color["red"] * 255),
-                    int(color["green"] * 255),
-                    int(color["blue"] * 255),
+                    "Applied background %s to %d range(s)", color_hex, len(ranges)
                 )
         except Exception as e:
-            logger.error(
-                "set_status_cell_style failed for row %d: %s", row_num, e
-            )
-
+            logger.error("_apply_cell_background failed: %s", e)
     # ------------------------------------------------------------------
     # Messaging
     # ------------------------------------------------------------------
@@ -474,7 +485,7 @@ class LarkClient:
     def _shipment_line(r):
         """Format one shipment line for the daily summary.
 
-        Format: â¢ **tracking#** -- customer -- last status / location -- delivery info
+        Format: Ã¢ÂÂ¢ **tracking#** -- customer -- last status / location -- delivery info
         Tracking numbers are bold.  Each line is a bullet point.
         """
         tracking = r.get("tracking_num", "N/A")
@@ -522,7 +533,7 @@ class LarkClient:
             if not parts:
                 parts.append("in transit")
             box_summary = ", ".join(parts)
-            return f"â¢ **{tracking}** ({total} boxes) -- {name} -- {box_summary}"
+            return f"Ã¢ÂÂ¢ **{tracking}** ({total} boxes) -- {name} -- {box_summary}"
 
         # ---- Build status + location description ----
         if status == "DELIVERED":
@@ -561,7 +572,7 @@ class LarkClient:
             else:
                 date_desc = ""
 
-        return f"â¢ **{tracking}** -- {name} -- {status_desc}{date_desc}"
+        return f"Ã¢ÂÂ¢ **{tracking}** -- {name} -- {status_desc}{date_desc}"
 
     # ------------------------------------------------------------------
     # Daily summary
@@ -574,7 +585,7 @@ class LarkClient:
             HLT Shipment Tracker
             -- HANNAH --
             __FEDEX__
-            â¢ **tracking** -- customer -- status/location -- delivery date
+            Ã¢ÂÂ¢ **tracking** -- customer -- status/location -- delivery date
             ...
             __UPS__
             ...
@@ -682,7 +693,7 @@ class LarkClient:
             else:
                 month_tag = ""
 
-            line = f"â¢ **{carrier}** {tracking}{box_tag} -- {name}{month_tag}: {detail}"
+            line = f"Ã¢ÂÂ¢ **{carrier}** {tracking}{box_tag} -- {name}{month_tag}: {detail}"
             lines.append(line)
 
         message = NL.join(lines)
