@@ -204,6 +204,48 @@ class LarkClient:
         logger.info("  %d rows with tracking in sheet %s", len(results), sheet_id)
         return results
 
+    def read_all_status_rows(self, spreadsheet_token, sheet_id):
+        """Read every row with a non-empty status value in column M.
+
+        Unlike read_tracking_data() which requires a tracking number + carrier,
+        this method returns ALL rows that have any status set -- including rows
+        in Hannah/Lucy/Other tabs that have no tracking number (e.g. manual
+        status entries, fully delivered rows with cleared tracking, sub-rows
+        that inherit tracking from above, etc.).
+
+        Returns a list of dicts with keys: row_num, current_status.
+        """
+        start_row = HEADER_ROW + 1
+        # Read only column M (status) to keep the request lightweight
+        range_str = f"{sheet_id}!M{start_row}:M500"
+        url = (
+            f"{self.base_url}/open-apis/sheets/v2/spreadsheets/"
+            f"{spreadsheet_token}/values/{range_str}"
+        )
+        resp = requests.get(
+            url,
+            headers=self._headers(),
+            params={"valueRenderOption": "ToString"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("code") != 0:
+            raise Exception(f"Failed to read status column {range_str}: {data}")
+        raw_rows = data.get("data", {}).get("valueRange", {}).get("values", [])
+        results = []
+        for i, row in enumerate(raw_rows):
+            status_val = ""
+            if isinstance(row, list) and len(row) > 0:
+                status_val = str(row[0] or "").strip()
+            if status_val:
+                results.append({
+                    "row_num": start_row + i,
+                    "current_status": status_val,
+                })
+        logger.info("  %d rows with status in sheet %s", len(results), sheet_id)
+        return results
+
     def write_cells(self, spreadsheet_token, sheet_id, updates):
         if not updates:
             return
