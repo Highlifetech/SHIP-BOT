@@ -527,7 +527,7 @@ class LarkClient:
     def _shipment_line(r):
         """Format one shipment line for the daily summary.
 
-        Format: • **tracking#** -- customer -- last status / location -- delivery info
+        Format: - **tracking#** -- customer -- last status / location -- delivery info
         Tracking numbers are bold.  Each line is a bullet point.
         """
         tracking = r.get("tracking_num", "N/A")
@@ -575,7 +575,7 @@ class LarkClient:
             if not parts:
                 parts.append("in transit")
             box_summary = ", ".join(parts)
-            return f"• **{tracking}** ({total} boxes) -- {name} -- {box_summary}"
+            return f"- **{tracking}** ({total} boxes) -- {name} -- {box_summary}"
 
         # ---- Build status + location description ----
         if status == "DELIVERED":
@@ -614,7 +614,7 @@ class LarkClient:
             else:
                 date_desc = ""
 
-        return f"• **{tracking}** -- {name} -- {status_desc}{date_desc}"
+        return f"- **{tracking}** -- {name} -- {status_desc}{date_desc}"
 
     # ------------------------------------------------------------------
     # Daily summary
@@ -627,7 +627,7 @@ class LarkClient:
             HLT Shipment Tracker
             -- HANNAH --
             __FEDEX__
-            • **tracking** -- customer -- status/location -- delivery date
+            - **tracking** -- customer -- status/location -- delivery date
             ...
             __UPS__
             ...
@@ -735,7 +735,7 @@ class LarkClient:
             else:
                 month_tag = ""
 
-            line = f"• **{carrier}** {tracking}{box_tag} -- {name}{month_tag}: {detail}"
+            line = f"- **{carrier}** {tracking}{box_tag} -- {name}{month_tag}: {detail}"
             lines.append(line)
 
         message = NL.join(lines)
