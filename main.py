@@ -327,73 +327,67 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
 
             time.sleep(0.5)
 
-        # ---- Batch-apply conditional formatting to ALL status rows in this tab ----
-        # Uses read_all_status_rows() which returns EVERY row with a non-empty
-        # status in column M -- including Hannah/Lucy/Other rows that have no
-        # tracking number and would be missed by the tracking-only rows list.
-        # For rows that were actively tracked this run, uses the fresh API status.
+        # ---- Batch-apply colors to all status rows in this tab ----
         if not dry_run:
-            # Build a lookup: row_num -> new_status for rows we actively tracked
             tracked_status = {}
             for r in all_results:
                 if r.get("tab") == tab_title and r.get("sheet_token") == spreadsheet_token:
                     tracked_status[r["row_num"]] = r.get("new_status", "") or r.get("current_status", "")
-            # Read ALL rows that have any status value (covers Hannah/Lucy/Other
-            # rows with no tracking number, plus all Delivered/sibling rows)
             try:
                 all_status_rows = lark.read_all_status_rows(spreadsheet_token, sheet_id)
             except Exception as e:
-                logger.error("  Failed to read all status rows for tab '%s': %s", tab_title, e)
-                all_status_rows = rows  # fall back to tracking rows only
-            style_pairs = []
-            for r in all_status_rows:
-                row_num = r["row_num"]
-                if row_num in tracked_status:
-                    status_raw = tracked_status[row_num]
-                else:
-                    # Delivered / sibling / untracked / non-tracking rows -- use current sheet value
-                    status_raw = r.get("current_status", "")
-                if status_raw:
-                    display = _to_dropdown(status_raw)
-                    style_pairs.append((row_num, display))
+                logger.error("  Failed to read status rows for '%s': %s", tab_title, e)
+                all_status_rows = rows
+            style_pairs = [(r["row_num"], _to_dropdown(tracked_status.get(r["row_num"], r.get("current_status", ""))))
+                           for r in all_status_rows if tracked_status.get(r["row_num"], r.get("current_status", ""))]
             if style_pairs:
                 try:
                     lark.set_status_styles_batch(spreadsheet_token, sheet_id, style_pairs)
                     logger.info("  Styled %d status cells in tab '%s'", len(style_pairs), tab_title)
                 except Exception as e:
-                    logger.error("  Batch style failed for tab '%s': %s", tab_title, e)
-
-
-    # ---- Style ALL remaining tabs (historical months not in scan window) ----
-    # These tabs were not tracked this run but still need color styling.
-    # We read their status column and apply colors based on current sheet values.
-    if not dry_run:
-        styled_tab_ids = {t["sheet_id"] for t in tabs_to_process}
-        for tab in tabs:
-            if tab["sheet_id"] in styled_tab_ids:
-                continue  # already styled above
-            tab_title = tab["title"]
-            sheet_id = tab["sheet_id"]
-            try:
-                all_status_rows = lark.read_all_status_rows(spreadsheet_token, sheet_id)
-            except Exception as e:
-                logger.error("  Failed to read status rows for tab '%s': %s", tab_title, e)
-                continue
-            style_pairs = []
-            for r in all_status_rows:
-                status_raw = r.get("current_status", "")
-                if status_raw:
-                    display = _to_dropdown(status_raw)
-                    style_pairs.append((r["row_num"], display))
-            if style_pairs:
-                try:
-                    lark.set_status_styles_batch(spreadsheet_token, sheet_id, style_pairs)
-                    logger.info("  Styled %d status cells in tab '%s'", len(style_pairs), tab_title)
-                except Exception as e:
-                    logger.error("  Batch style failed for tab '%s': %s", tab_title, e)
+                    logger.error("  Batch style failed for '%s': %s", tab_title, e)
 
     return all_results
 
+
+
+def style_all_sheets(lark, dry_run=False):
+    """Apply status cell background colors to EVERY tab on EVERY spreadsheet.
+
+    Runs after process_sheet() so that historical month tabs (outside the
+    current scan window) also get colored, not just FEB and MAR.
+    Reads column M only for efficiency; skips tabs with no status values.
+    """
+    if dry_run or not SHEET_TOKENS:
+        return
+    for token in SHEET_TOKENS:
+        try:
+            tabs = lark.get_sheet_metadata(token)
+        except Exception as e:
+            logger.error("style_all_sheets: failed to read tabs for %s: %s", token, e)
+            continue
+        logger.info("Styling ALL %d tabs in spreadsheet %s", len(tabs), token)
+        for tab in tabs:
+            tab_title = tab["title"]
+            sheet_id  = tab["sheet_id"]
+            try:
+                status_rows = lark.read_all_status_rows(token, sheet_id)
+            except Exception as e:
+                logger.error("  style_all_sheets: failed to read '%s': %s", tab_title, e)
+                continue
+            if not status_rows:
+                continue
+            style_pairs = []
+            for r in status_rows:
+                raw = r.get("current_status", "")
+                if raw:
+                    style_pairs.append((r["row_num"], _to_dropdown(raw)))
+            if style_pairs:
+                try:
+                    lark.set_status_styles_batch(token, sheet_id, style_pairs)
+                    logger.info("  Styled %d cells in tab '%s'", len(style_pairs), tab_title)
+                except Exception as e:
+                    logger.error("  Batch style failed for '%s': %s", tab_title, e)
 
 def run_tracker(dry_run=False, chat_id=None, message_id=None):
     if not SHEET_TOKENS:
@@ -412,6 +406,9 @@ def run_tracker(dry_run=False, chat_id=None, message_id=None):
         logger.info("  -> %d active shipments from %s", len(results), token)
 
     logger.info("Total active shipments: %d", len(all_results))
+
+    # Style every tab on every sheet (historical months + current scan tabs)
+    style_all_sheets(lark, dry_run=dry_run)
 
     if not dry_run:
         try:
