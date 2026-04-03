@@ -520,6 +520,24 @@ class LarkClient:
         return status == "DELIVERED"
 
     # ------------------------------------------------------------------
+    # Tracking URL helper
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _tracking_url(tracking, carrier):
+        """Return a clickable tracking URL for the given carrier."""
+        c = (carrier or "").strip().upper()
+        if c == "FEDEX":
+            return f"https://www.fedex.com/fedextrack/?trknbr={tracking}"
+        if c == "UPS":
+            return f"https://www.ups.com/track?tracknum={tracking}"
+        if c == "USPS":
+            return f"https://tools.usps.com/go/TrackConfirmAction?tLabels={tracking}"
+        if c == "DHL":
+            return f"https://www.dhl.com/en/express/tracking.html?AWB={tracking}"
+        return ""
+
+    # ------------------------------------------------------------------
     # Shipment line formatting for the chat message
     # ------------------------------------------------------------------
 
@@ -528,11 +546,12 @@ class LarkClient:
         """Format one shipment line for the daily summary.
 
         Format: - **tracking#** -- customer -- last status / location -- delivery info
-        Tracking numbers are bold.  Each line is a bullet point.
+        Tracking numbers are bold links.  Each line is a bullet point.
         """
         tracking = r.get("tracking_num", "N/A")
         customer = r.get("customer", "").strip()
         recipient = r.get("recipient", "").strip()
+        carrier = r.get("carrier", "").strip()
 
         # Determine the display name
         if recipient.upper() == "BRENDAN":
@@ -547,6 +566,10 @@ class LarkClient:
         location = r.get("location", "").strip()
         delivery = r.get("delivery_date", "").strip()
         packages = r.get("packages", [])
+
+        # Build a clickable tracking link if a URL is available
+        url = LarkClient._tracking_url(tracking, carrier)
+        tracking_display = f"[**{tracking}**]({url})" if url else f"**{tracking}**"
 
         # ---- UPS multi-box: detailed per-box breakdown ----
         if packages and len(packages) > 1:
@@ -575,7 +598,7 @@ class LarkClient:
             if not parts:
                 parts.append("in transit")
             box_summary = ", ".join(parts)
-            return f"- **{tracking}** ({total} boxes) -- {name} -- {box_summary}"
+            return f"- {tracking_display} ({total} boxes) -- {name} -- {box_summary}"
 
         # ---- Build status + location description ----
         if status == "DELIVERED":
@@ -614,9 +637,9 @@ class LarkClient:
             else:
                 date_desc = ""
 
-        return f"- **{tracking}** -- {name} -- {status_desc}{date_desc}"
+        return f"- {tracking_display} -- {name} -- {status_desc}{date_desc}"
 
-    # ------------------------------------------------------------------
+        # ------------------------------------------------------------------
     # Daily summary
     # ------------------------------------------------------------------
 
