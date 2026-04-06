@@ -687,7 +687,7 @@ class LarkClient:
 
         def render_section(label, items):
             display = SECTION_DISPLAY.get(label, label.upper())
-            lines.append(NL + f"**-- {display} --**")
+            lines.append(NL + NL + f"**-- {display} --**")
             if not items:
                 lines.append("No active shipments")
                 return
