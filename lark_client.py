@@ -687,7 +687,7 @@ class LarkClient:
 
         def render_section(label, items):
             display = SECTION_DISPLAY.get(label, label.upper())
-            lines.append(NL + NL + f"**-- {display} --**")
+            lines.append(NL + NL + "**" + "".join(c + "\u0332" for c in display) + "**")
             if not items:
                 lines.append("No active shipments")
                 return
@@ -697,8 +697,8 @@ class LarkClient:
                 c = r.get("carrier", "").strip().upper() or "UNKNOWN"
                 by_carrier.setdefault(c, []).append(r)
             for carrier in sorted(by_carrier):
-                # Underline carrier names using Lark markdown <u> tag
-                lines.append(NL + f"<u>{carrier}</u>")
+                # Underline carrier names using unicode combining low line (\u0332)
+                lines.append(NL + "".join(c + "\u0332" for c in carrier))
                 for r in by_carrier[carrier]:
                     lines.append(LarkClient._shipment_line(r))
 
