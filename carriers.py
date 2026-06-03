@@ -425,7 +425,7 @@ class DHLTracker:
     # Keep a class-level timestamp so calls are spaced out across the run,
     # and back off when DHL returns HTTP 429 (Too Many Requests).
     _last_call = 0.0
-    _MIN_INTERVAL = 1.5  # seconds between DHL API calls
+    _MIN_INTERVAL = 0.6  # seconds between DHL API calls
     MAX_RETRIES = 3
 
     def _throttle(self):
@@ -459,8 +459,8 @@ class DHLTracker:
                     except (ValueError, TypeError):
                         wait = 0
                     if wait <= 0:
-                        wait = 2.0 * (2 ** attempt)
-                    wait = min(wait, 15.0)
+                        wait = 1.5 * (2 ** attempt)
+                    wait = min(wait, 8.0)
                     last_error = "429 Too Many Requests"
                     logger.warning(
                         "DHL 429 for %s (attempt %d/%d); backing off %.1fs",
