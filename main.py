@@ -305,9 +305,11 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
                 if not dry_run:
                     try:
                         num_boxes = str(len(packages)) if packages else ""
+                        # Only write a date to the sheet once delivered; keep estimate for the chat message only
+                        sheet_delivery_date = delivery_date if new_status == "Delivered" else ""
                         lark.update_tracking_row(
                             spreadsheet_token, sheet_id, row["row_num"],
-                            delivery_date, num_boxes,
+                            sheet_delivery_date, num_boxes,
                         )
                         logger.info("  Updated %s: delivery=%s boxes=%s",
                                     tracking_num, delivery_date or "(none)", num_boxes or "(none)")
