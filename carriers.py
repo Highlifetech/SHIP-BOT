@@ -4,9 +4,10 @@ Carrier Tracking Clients
 Uses the official FedEx Track API (requires credentials).
 Uses free public tracking endpoints for USPS/Royal Mail.
 UPS and DHL use their respective APIs (existing credentials).
+SF Express uses its public international tracking endpoint (no key).
 
 UPS multi-piece shipments: when a tracking number is part of a multi-box
-shipment, the API returns all sibling packages.  We capture total boxes,
+shipment, the API returns all sibling packages. We capture total boxes,
 how many are scanned/unscanned, and delivery date breakdown.
 """
 import logging
@@ -38,7 +39,6 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-
 def _fmt_date(date_str):
     """Convert YYYY-MM-DD to MM-DD-YYYY for the Lark Sheet."""
     if not date_str:
@@ -52,13 +52,12 @@ def _fmt_date(date_str):
             continue
     return date_str
 
-
 def normalize_result(status, delivery_date="", location="", raw_status="",
                      error="", packages=None):
     """Return a standardized tracking result.
 
     packages: list of dicts for multi-piece UPS shipments, each:
-      {"tracking_num": str, "status": str, "delivery_date": str, "scanned": bool}
+        {"tracking_num": str, "status": str, "delivery_date": str, "scanned": bool}
     """
     return {
         "status": STATUS_MAP.get(status, STATUS_MAP["unknown"]),
@@ -70,7 +69,6 @@ def normalize_result(status, delivery_date="", location="", raw_status="",
         "packages": packages or [],
     }
 
-
 def _safe_expires(data, key="expires_in", default=3600):
     val = data.get(key, default)
     try:
@@ -78,14 +76,12 @@ def _safe_expires(data, key="expires_in", default=3600):
     except (ValueError, TypeError):
         return default
 
-
 def _parse_ups_date(date_str):
     """Convert UPS date string YYYYMMDD to YYYY-MM-DD."""
     if date_str and len(str(date_str)) == 8:
         s = str(date_str)
-        return f"{s[:4]}-{s[4:6]}-{s[6:]}"
+        return "%s-%s-%s" % (s[:4], s[4:6], s[6:])
     return ""
-
 
 def _format_date_short(date_str):
     """Convert YYYY-MM-DD to 'Mar 5' style."""
@@ -96,7 +92,6 @@ def _format_date_short(date_str):
         return dt.strftime("%b %-d")
     except Exception:
         return date_str
-
 
 # =============================================================================
 # FedEx Track API v1
@@ -130,7 +125,7 @@ class FedExTracker:
         try:
             token = self._authenticate()
             headers = {
-                "Authorization": f"Bearer {token}",
+                "Authorization": "Bearer %s" % token,
                 "Content-Type": "application/json",
             }
             body = {
@@ -199,7 +194,6 @@ class FedExTracker:
                         "scanned": tr_scanned,
                     })
             else:
-                # Single piece but check pieceCount from shipment details
                 piece_count = results.get("pieceCount", "")
                 if not piece_count:
                     piece_count = results.get("packageDetails", {}).get("count", "")
@@ -218,7 +212,6 @@ class FedExTracker:
         except Exception as e:
             logger.error("FedEx tracking error for %s: %s", tracking_number, e)
             return normalize_result("unknown", error=str(e))
-
 
 # =============================================================================
 # UPS Tracking API -- with multi-piece shipment support
@@ -291,12 +284,12 @@ class UPSTracker:
         try:
             token = self._authenticate()
             headers = {
-                "Authorization": f"Bearer {token}",
+                "Authorization": "Bearer %s" % token,
                 "Content-Type": "application/json",
-                "transId": f"track-{tracking_number[:20]}",
+                "transId": "track-%s" % tracking_number[:20],
                 "transactionSrc": "lark-tracking-bot",
             }
-            url = f"{self.TRACK_URL}/{tracking_number}"
+            url = "%s/%s" % (self.TRACK_URL, tracking_number)
             resp = requests.get(
                 url, headers=headers,
                 params={"locale": "en_US", "returnSignature": "false"},
@@ -311,7 +304,6 @@ class UPSTracker:
             if not all_packages:
                 return normalize_result("not_found")
 
-            # ---- Primary package (the one we tracked) ----
             primary = all_packages[0]
             activity = primary.get("activity", [])
             if not activity:
@@ -340,7 +332,6 @@ class UPSTracker:
                 date_str = str(latest.get("date", ""))
                 delivery_date = _parse_ups_date(date_str)
 
-            # ---- Multi-piece: build per-box breakdown ----
             packages_info = []
             if len(all_packages) > 1:
                 for pkg in all_packages:
@@ -361,7 +352,6 @@ class UPSTracker:
         except Exception as e:
             logger.error("UPS tracking error for %s: %s", tracking_number, e)
             return normalize_result("unknown", error=str(e))
-
 
 # =============================================================================
 # USPS - Scrapes the public USPS tracking page (no API key needed)
@@ -386,12 +376,12 @@ class USPSTracker:
             status = "in_transit"
             delivery_date = ""
 
-            if re.search(r'Delivered', html, re.IGNORECASE):
+            if re.search(r"Delivered", html, re.IGNORECASE):
                 status = "delivered"
                 raw_status = "Delivered"
                 date_match = re.search(
-                    r'(January|February|March|April|May|June|July|August|'
-                    r'September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})',
+                    r"(January|February|March|April|May|June|July|August|"
+                    r"September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})",
                     html, re.IGNORECASE
                 )
                 if date_match:
@@ -401,16 +391,16 @@ class USPSTracker:
                         ).strftime("%Y-%m-%d")
                     except Exception:
                         pass
-            elif re.search(r'Out for Delivery', html, re.IGNORECASE):
+            elif re.search(r"Out for Delivery", html, re.IGNORECASE):
                 status = "out_for_delivery"
                 raw_status = "Out for Delivery"
-            elif re.search(r'In Transit', html, re.IGNORECASE):
+            elif re.search(r"In Transit", html, re.IGNORECASE):
                 status = "in_transit"
                 raw_status = "In Transit"
-            elif re.search(r'Alert', html, re.IGNORECASE):
+            elif re.search(r"Alert", html, re.IGNORECASE):
                 status = "exception"
                 raw_status = "Alert"
-            elif re.search(r'Pre-Shipment|Label Created', html, re.IGNORECASE):
+            elif re.search(r"Pre-Shipment|Label Created", html, re.IGNORECASE):
                 status = "label_created"
                 raw_status = "Pre-Shipment Info Sent"
             else:
@@ -424,68 +414,189 @@ class USPSTracker:
             logger.error("USPS tracking error for %s: %s", tracking_number, e)
             return normalize_result("unknown", error=str(e))
 
-
 # =============================================================================
-# DHL Tracking API
+# DHL Tracking API -- with throttling + 429 backoff
 # =============================================================================
 
 class DHLTracker:
     TRACK_URL = "https://api-eu.dhl.com/track/shipments"
 
+    # DHL free tier is rate limited (roughly 1 request/sec, 250/day).
+    # Keep a class-level timestamp so calls are spaced out across the run,
+    # and back off when DHL returns HTTP 429 (Too Many Requests).
+    _last_call = 0.0
+    _MIN_INTERVAL = 1.5  # seconds between DHL API calls
+    MAX_RETRIES = 3
+
+    def _throttle(self):
+        """Sleep so consecutive DHL calls are at least _MIN_INTERVAL apart."""
+        now = time.time()
+        elapsed = now - DHLTracker._last_call
+        if elapsed < DHLTracker._MIN_INTERVAL:
+            time.sleep(DHLTracker._MIN_INTERVAL - elapsed)
+        DHLTracker._last_call = time.time()
+
+    def track(self, tracking_number):
+        if not DHL_API_KEY:
+            return normalize_result("unknown", error="DHL API key not configured")
+
+        last_error = ""
+        for attempt in range(self.MAX_RETRIES):
+            self._throttle()
+            try:
+                resp = requests.get(
+                    self.TRACK_URL,
+                    headers={"DHL-API-Key": DHL_API_KEY},
+                    params={"trackingNumber": tracking_number},
+                    timeout=30,
+                )
+
+                if resp.status_code == 429:
+                    # Respect Retry-After if present, else exponential backoff.
+                    retry_after = resp.headers.get("Retry-After")
+                    try:
+                        wait = float(retry_after) if retry_after else 0
+                    except (ValueError, TypeError):
+                        wait = 0
+                    if wait <= 0:
+                        wait = 2.0 * (2 ** attempt)
+                    wait = min(wait, 15.0)
+                    last_error = "429 Too Many Requests"
+                    logger.warning(
+                        "DHL 429 for %s (attempt %d/%d); backing off %.1fs",
+                        tracking_number, attempt + 1, self.MAX_RETRIES, wait,
+                    )
+                    time.sleep(wait)
+                    continue
+
+                if resp.status_code == 404:
+                    return normalize_result("not_found")
+
+                resp.raise_for_status()
+                data = resp.json()
+
+                shipments = data.get("shipments", [])
+                if not shipments:
+                    return normalize_result("not_found")
+
+                shipment = shipments[0]
+                status_obj = shipment.get("status", {})
+                status_code = status_obj.get("statusCode", "").lower()
+                raw_status = status_obj.get("description", "")
+                location = (status_obj.get("location", {})
+                            .get("address", {})
+                            .get("addressLocality", ""))
+
+                status_map = {
+                    "delivered": "delivered",
+                    "transit": "in_transit",
+                    "failure": "exception",
+                    "pre-transit": "label_created",
+                    "unknown": "unknown",
+                }
+                status = status_map.get(status_code, "in_transit")
+
+                delivery_date = ""
+                if status == "delivered":
+                    ts = status_obj.get("timestamp", "")
+                    if ts:
+                        delivery_date = ts[:10]
+                elif shipment.get("estimatedTimeOfDelivery"):
+                    etd = shipment["estimatedTimeOfDelivery"]
+                    delivery_date = etd[:10] if isinstance(etd, str) else ""
+
+                return normalize_result(status, delivery_date, location, raw_status)
+
+            except requests.exceptions.HTTPError as e:
+                code = e.response.status_code if e.response is not None else None
+                if code == 404:
+                    return normalize_result("not_found")
+                last_error = str(e)
+                logger.error("DHL tracking error for %s: %s", tracking_number, e)
+                break
+            except Exception as e:
+                last_error = str(e)
+                logger.error("DHL tracking error for %s: %s", tracking_number, e)
+                break
+
+        # All retries exhausted (or hard error): keep the row visible, don't crash.
+        logger.warning("DHL giving up on %s after retries: %s", tracking_number, last_error)
+        return normalize_result("unknown", error=last_error or "DHL unavailable")
+
+# =============================================================================
+# SF Express (順豐) -- public international tracking endpoint (no API key)
+# =============================================================================
+
+class SFExpressTracker:
+    """Best-effort tracking via SF Express's public international route API.
+
+    SF Express does not offer a free keyless API with guaranteed uptime, so
+    this is best-effort: on any failure we return 'unknown' (NOT 'not_found')
+    so the shipment still appears in the summary instead of being dropped.
+    """
+    ROUTE_URL = ("https://www.sf-international.com/sf-service-owf-web/"
+                 "service/integration/track/route")
+
     def track(self, tracking_number):
         try:
-            if not DHL_API_KEY:
-                raise Exception("DHL API key not configured")
-            resp = requests.get(
-                self.TRACK_URL,
-                headers={"DHL-API-Key": DHL_API_KEY},
-                params={"trackingNumber": tracking_number},
-                timeout=30,
+            payload = {
+                "trackingType": "SFNUMBER",
+                "trackingNumber": [tracking_number],
+                "language": "en",
+                "translate": "en",
+            }
+            headers = {
+                **HEADERS,
+                "Content-Type": "application/json",
+                "Referer": "https://www.sf-international.com/",
+            }
+            resp = requests.post(
+                self.ROUTE_URL, headers=headers, json=payload, timeout=30
             )
-            resp.raise_for_status()
+            if resp.status_code != 200:
+                return normalize_result("unknown",
+                                        error="SF Express HTTP %s" % resp.status_code)
             data = resp.json()
 
-            shipments = data.get("shipments", [])
-            if not shipments:
-                return normalize_result("not_found")
+            routes = (data.get("result", {})
+                          .get("waybillRouteResp", []))
+            if not routes:
+                return normalize_result("unknown", raw_status="No SF route data")
 
-            shipment = shipments[0]
-            status_obj = shipment.get("status", {})
-            status_code = status_obj.get("statusCode", "").lower()
-            raw_status = status_obj.get("description", "")
-            location = (status_obj.get("location", {})
-                        .get("address", {})
-                        .get("addressLocality", ""))
+            route = routes[0]
+            events = route.get("waybillRoute", []) or []
+            if not events:
+                return normalize_result("label_created", raw_status="Accepted")
 
-            status_map = {
-                "delivered": "delivered",
-                "transit": "in_transit",
-                "failure": "exception",
-                "pre-transit": "label_created",
-                "unknown": "unknown",
-            }
-            status = status_map.get(status_code, "in_transit")
+            # Events are ordered oldest->newest; take the most recent.
+            latest = events[-1]
+            remark = (latest.get("remark", "") or "").strip()
+            op_code = str(latest.get("opCode", "")).strip()
+            accept_time = latest.get("acceptTime", "") or ""
+            location = latest.get("acceptAddress", "") or ""
+
+            text = remark.lower()
+            if "delivered" in text or "signed" in text or op_code == "8000":
+                status = "delivered"
+            elif "out for delivery" in text or op_code == "44":
+                status = "out_for_delivery"
+            elif "exception" in text or "failed" in text or "返" in remark:
+                status = "exception"
+            elif "picked up" in text or "collected" in text or op_code == "50":
+                status = "in_transit"
+            else:
+                status = "in_transit"
 
             delivery_date = ""
-            if status == "delivered":
-                ts = status_obj.get("timestamp", "")
-                if ts:
-                    delivery_date = ts[:10]
-            elif shipment.get("estimatedTimeOfDelivery"):
-                etd = shipment["estimatedTimeOfDelivery"]
-                delivery_date = etd[:10] if isinstance(etd, str) else ""
+            if status == "delivered" and accept_time:
+                delivery_date = accept_time[:10]
 
-            return normalize_result(status, delivery_date, location, raw_status)
+            return normalize_result(status, delivery_date, location, remark or "In Transit")
 
-        except requests.exceptions.HTTPError as e:
-            if e.response and e.response.status_code == 404:
-                return normalize_result("not_found")
-            logger.error("DHL tracking error for %s: %s", tracking_number, e)
-            return normalize_result("unknown", error=str(e))
         except Exception as e:
-            logger.error("DHL tracking error for %s: %s", tracking_number, e)
+            logger.error("SF Express tracking error for %s: %s", tracking_number, e)
+            # Keep the row visible rather than dropping it.
             return normalize_result("unknown", error=str(e))
-
 
 # =============================================================================
 # Royal Mail
@@ -494,13 +605,13 @@ class DHLTracker:
 class RoyalMailTracker:
     def track(self, tracking_number):
         try:
-            url = f"https://api.royalmail.com/mailpieces/v2/{tracking_number}/events"
+            url = "https://api.royalmail.com/mailpieces/v2/%s/events" % tracking_number
             headers = {
                 **HEADERS,
                 "Accept": "application/json",
                 "Referer": (
-                    f"https://www.royalmail.com/track-your-item"
-                    f"#/tracking-results/{tracking_number}"
+                    "https://www.royalmail.com/track-your-item"
+                    "#/tracking-results/%s" % tracking_number
                 ),
             }
             resp = requests.get(url, headers=headers, timeout=30)
@@ -544,7 +655,6 @@ class RoyalMailTracker:
                 location = events[0].get("locationName", "") if events else ""
                 return normalize_result(status, delivery_date, location, raw_status)
 
-            # Fallback: try web scraping
             resp2 = requests.get(
                 "https://www.royalmail.com/track-your-item",
                 params={"trackNumber": tracking_number},
@@ -567,7 +677,6 @@ class RoyalMailTracker:
             logger.error("Royal Mail tracking error for %s: %s", tracking_number, e)
             return normalize_result("unknown", error=str(e))
 
-
 # =============================================================================
 # Unified Tracker
 # =============================================================================
@@ -579,12 +688,14 @@ class CarrierTracker:
         self.usps = USPSTracker()
         self.dhl = DHLTracker()
         self.royalmail = RoyalMailTracker()
+        self.sfexpress = SFExpressTracker()
         self._clients = {
             "fedex": self.fedex,
             "ups": self.ups,
             "usps": self.usps,
             "dhl": self.dhl,
             "royalmail": self.royalmail,
+            "sfexpress": self.sfexpress,
         }
 
     def track(self, tracking_number, carrier):
@@ -593,6 +704,6 @@ class CarrierTracker:
             logger.warning("Unknown carrier '%s' for tracking %s",
                            carrier, tracking_number)
             return normalize_result("unknown",
-                                    error=f"Unsupported carrier: {carrier}")
+                                    error="Unsupported carrier: %s" % carrier)
         logger.info("Tracking %s via %s", tracking_number, carrier.upper())
         return client.track(tracking_number)
