@@ -150,7 +150,7 @@ class LarkClient:
 
             shipment_id_raw = str(row[0] or "").strip()
             tracking_raw = str(row[6] or "").strip()
-            carrier_raw = str(row[8 or "").strip()
+            carrier_raw = str(row[8] or "").strip()
             num_boxes_raw = str(row[15] or "").strip()
 
             shipment_id = shipment_id_raw or last_shipment_id
