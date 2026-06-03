@@ -51,7 +51,7 @@ COLUMNS = {
     "order_num": "D",
     "customer": "E",
     "product_photo": "F",
-    "tracking_num": "G",
+    "tracking_num": "H",
     "carrier": "I",
     "qty_shipped": "J",
     "qty_expected": "K",
