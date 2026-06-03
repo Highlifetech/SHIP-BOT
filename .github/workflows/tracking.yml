@@ -7,6 +7,11 @@ on:
         # 8:00 PM EST (01:00 UTC)
         - cron: '0 1 * * *'
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (no sheet writes, no chat message)'
+        type: boolean
+        default: false
 
 jobs:
   track-shipments:
@@ -40,4 +45,4 @@ jobs:
           USPS_CLIENT_ID: ${{ secrets.USPS_CLIENT_ID }}
           USPS_CLIENT_SECRET: ${{ secrets.USPS_CLIENT_SECRET }}
           DHL_API_KEY: ${{ secrets.DHL_API_KEY }}
-        run: python main.py
+        run: python main.py ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
