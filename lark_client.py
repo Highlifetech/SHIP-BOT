@@ -535,6 +535,14 @@ class LarkClient:
         delivery = r.get("delivery_date", "").strip()
         packages = r.get("packages", [])
 
+        group_count = int(r.get("group_count", 1) or 1)
+        grouped = group_count > 1
+        # For shipments where one tracking number covers many sheet rows, show a
+        # single grouped line representing all the items (no per-order/customer).
+        if grouped:
+            name = f"{group_count} items"
+            order = ""
+
         url = LarkClient._tracking_url(tracking, carrier)
         tracking_display = f"[**{tracking}**]({url})" if url else f"**{tracking}**"
 
@@ -600,6 +608,8 @@ class LarkClient:
             else:
                 date_desc = ""
 
+        if grouped:
+            return f"- {tracking_display} -- {name} -- {status_desc}{date_desc}"
         return f"- {tracking_display} -- {order} -- {name} -- {status_desc}{date_desc}"
 
     def send_daily_summary(self, all_results, chat_id=None, message_id=None):
@@ -612,11 +622,20 @@ class LarkClient:
             )
             return
 
+        # Count how many active rows share each tracking number so we can
+        # collapse them into a single grouped line ("N items").
+        tracking_counts = {}
+        for r in active:
+            tn = r.get("tracking_num", "").strip()
+            if tn:
+                tracking_counts[tn] = tracking_counts.get(tn, 0) + 1
+
         seen, unique = set(), []
         for r in active:
             tn = r.get("tracking_num", "").strip()
             if tn and tn not in seen:
                 seen.add(tn)
+                r = {**r, "group_count": tracking_counts.get(tn, 1)}
                 unique.append(r)
 
         buckets = {tab: [] for tab in PERMANENT_TABS}
