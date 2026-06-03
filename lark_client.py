@@ -131,11 +131,11 @@ class LarkClient:
         start_row = HEADER_ROW + 1
         rows = self.read_sheet_range(
             spreadsheet_token, sheet_id,
-            start_col="A", end_col="Q",
+            start_col="A", end_col="R",
             start_row=start_row, end_row=500,
         )
 
-        MIN_COLS = 17
+        MIN_COLS = 18
         results = []
         last_shipment_id = ""
         last_tracking = ""
@@ -150,8 +150,8 @@ class LarkClient:
 
             shipment_id_raw = str(row[0] or "").strip()
             tracking_raw = str(row[6] or "").strip()
-            carrier_raw = str(row[7] or "").strip()
-            num_boxes_raw = str(row[14] or "").strip()
+            carrier_raw = str(row[8 or "").strip()
+            num_boxes_raw = str(row[15] or "").strip()
 
             shipment_id = shipment_id_raw or last_shipment_id
             tracking = tracking_raw or last_tracking
@@ -184,8 +184,8 @@ class LarkClient:
                 )
                 continue
 
-            status_raw = str(row[12] or "").strip()
-            delivery_raw = str(row[16] or "").strip()
+            status_raw = str(row[13] or "").strip()
+            delivery_raw = str(row[17] or "").strip()
 
             results.append({
                 "row_num": start_row + i,
@@ -217,7 +217,7 @@ class LarkClient:
         """
         start_row = HEADER_ROW + 1
         # Read only column M (status) to keep the request lightweight
-        range_str = f"{sheet_id}!M{start_row}:M500"
+        range_str = f"{sheet_id}!N{start_row}:N500"
         url = (
             f"{self.base_url}/open-apis/sheets/v2/spreadsheets/"
             f"{spreadsheet_token}/values/{range_str}"
@@ -312,7 +312,7 @@ class LarkClient:
                 "set_status_cell_style: unknown status '%s', skipping", status_value
             )
             return
-        range_str = f"{sheet_id}!M{row_num}:M{row_num}"
+        range_str = f"{sheet_id}!N{row_num}:N{row_num}"
         self._apply_cell_background(spreadsheet_token, [range_str], color_hex)
 
     def set_status_styles_batch(self, spreadsheet_token, sheet_id, row_status_pairs):
@@ -335,7 +335,7 @@ class LarkClient:
                     status_value, row_num,
                 )
                 continue
-            by_color.setdefault(color_hex, []).append(f"{sheet_id}!M{row_num}:M{row_num}")
+            by_color.setdefault(color_hex, []).append(f"{sheet_id}!N{row_num}:N{row_num}")
 
         for color_hex, ranges in by_color.items():
             self._apply_cell_background(spreadsheet_token, ranges, color_hex)
