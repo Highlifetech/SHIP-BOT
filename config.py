@@ -124,3 +124,57 @@ STATUS_MAP = {
     "unknown": "Label Created/Not Scanned",
     "not_found": "Label Created/Not Scanned",
 }
+
+
+# =============================================================================
+# PER-SPREADSHEET COLUMN OVERRIDES
+# =============================================================================
+# Some spreadsheets use a different column layout than the default COLUMNS map.
+# Map a sheet token to an override dict here. Any field not listed falls back
+# to the default COLUMNS value. col_to_index() converts a letter to a 0-based
+# index; an empty string means the column does not exist on that sheet.
+#
+# "2026 OTHER INBOUND SHIPMENTS" (token LxYSsmrrehIeRttb0UtjhtvBp7b) is shifted
+# one column LEFT vs the main sheets: Tracking#=G, Carrier=H, Status=M.
+SHEET_COLUMN_OVERRIDES = {
+    "LxYSsmrrehIeRttb0UtjhtvBp7b": {
+        "shipment_id": "A",
+        "vendor": "B",
+        "recipient": "C",
+        "order_num": "D",
+        "customer": "E",
+        "product_photo": "F",
+        "tracking_num": "G",
+        "carrier": "H",
+        "qty_shipped": "I",
+        "qty_expected": "J",
+        "discrepancy": "K",
+        "balance_owed": "L",
+        "status": "M",
+        "num_boxes": "",
+        "notes": "",
+        "delivery_date": "",
+    },
+}
+
+
+def columns_for(spreadsheet_token):
+    """Return the column-letter map for a spreadsheet, merging any override."""
+    merged = dict(COLUMNS)
+    override = SHEET_COLUMN_OVERRIDES.get((spreadsheet_token or "").strip())
+    if override:
+        merged.update(override)
+    return merged
+
+
+def col_to_index(col_letter):
+    """Convert a column letter (A, B, ... AA) to a 0-based index, or None."""
+    if not col_letter:
+        return None
+    col_letter = col_letter.strip().upper()
+    idx = 0
+    for ch in col_letter:
+        if not ("A" <= ch <= "Z"):
+            return None
+        idx = idx * 26 + (ord(ch) - ord("A") + 1)
+    return idx - 1
