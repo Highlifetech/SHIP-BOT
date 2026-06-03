@@ -2,12 +2,10 @@ name: Shipment Tracking Bot
 
 on:
   schedule:
-    # 8:00 AM ET (12:00 UTC during EDT, 13:00 UTC during EST — off by 1 hr in winter, acceptable)
-    - cron: '0 12 * * *'
-    # 1:00 PM ET (17:00 UTC during EDT)
-    - cron: '0 17 * * *'
-    # 8:00 PM ET (00:00 UTC during EDT)
-    - cron: '0 0 * * *'
+        # 8:00 AM EST (13:00 UTC)
+        - cron: '0 13 * * *'
+        # 8:00 PM EST (01:00 UTC)
+        - cron: '0 1 * * *'
   workflow_dispatch:
 
 jobs:
