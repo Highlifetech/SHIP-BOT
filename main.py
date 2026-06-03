@@ -15,7 +15,7 @@ We consolidate those siblings so that only ONE summary line is shown per
 shipment (e.g. "1ZHE... (5 boxes): 3 arriving Mar 5, 2 unscanned").
 
 Scheduling:
-    Runs at 8 AM, 1 PM, and 8 PM Eastern Time (ET).
+    Runs at 8 AM and 8 PM Eastern Time (ET).
     The GitHub Actions workflow fires at both EDT (UTC-4) and EST (UTC-5)
     equivalent times to handle daylight saving automatically.  A guard in
     main() ensures only one run executes per scheduled window (45-min window).
@@ -52,7 +52,7 @@ MONTH_NAMES = [
 BAD_STATUS_KEYS = {"unknown", "not_found", ""}
 DONE_STATUSES = {"DELIVERED"}
 
-SCHEDULED_TIMES_ET = [(8, 0), (13, 0), (20, 0)]
+SCHEDULED_TIMES_ET = [(8, 0), (20, 0)]
 SCHEDULE_WINDOW_MINUTES = 45
 
 VALID_STATUSES = {
@@ -166,6 +166,14 @@ def normalize_carrier(carrier_str):
     return CARRIER_ALIASES.get(carrier_str.lower().strip(), carrier_str.lower().strip())
 
 
+def _tab_matches(title, target_tabs):
+    norm = (title or "").strip().lower()
+    for t in target_tabs:
+        tl = t.lower()
+        if norm == tl or norm.startswith(tl):
+            return True
+    return False
+
 def tabs_to_scan():
     now = _eastern_now()
     current = MONTH_NAMES[now.month - 1]
@@ -217,7 +225,7 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
         return all_results
 
     target_tabs = tabs_to_scan()
-    tabs_to_process = [t for t in tabs if t["title"] in target_tabs]
+    tabs_to_process = [t for t in tabs if _tab_matches(t["title"], target_tabs)]
     if not tabs_to_process:
         logger.warning("No matching tabs in %s. Want: %s. Have: %s",
                         spreadsheet_token, sorted(target_tabs), [t["title"] for t in tabs])
