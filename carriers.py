@@ -421,12 +421,18 @@ class USPSTracker:
 class DHLTracker:
     TRACK_URL = "https://api-eu.dhl.com/track/shipments"
 
-    # DHL free tier is rate limited (roughly 1 request/sec, 250/day).
-    # Keep a class-level timestamp so calls are spaced out across the run,
-    # and back off when DHL returns HTTP 429 (Too Many Requests).
+    # DHL free tier is rate limited (roughly 1 request/sec, 250/day). Keep a
+    # class-level timestamp so calls are spaced out across the run. We do NOT
+    # retry on HTTP 429: a 429 from this key almost always means the daily
+    # quota is exhausted, so retrying just burns runtime. Instead we remember
+    # numbers that failed and, after several consecutive 429s, stop calling
+    # DHL for the rest of the run (treat the quota as exhausted).
     _last_call = 0.0
     _MIN_INTERVAL = 0.6  # seconds between DHL API calls
-    MAX_RETRIES = 3
+    _failed_numbers = {}          # tracking_number -> cached result
+    _consecutive_429 = 0
+    _quota_exhausted = False
+    _QUOTA_429_THRESHOLD = 5      # stop calling DHL after this many 429s in a row
 
     def _throttle(self):
         """Sleep so consecutive DHL calls are at least _MIN_INTERVAL apart."""
@@ -440,88 +446,89 @@ class DHLTracker:
         if not DHL_API_KEY:
             return normalize_result("unknown", error="DHL API key not configured")
 
-        last_error = ""
-        for attempt in range(self.MAX_RETRIES):
-            self._throttle()
-            try:
-                resp = requests.get(
-                    self.TRACK_URL,
-                    headers={"DHL-API-Key": DHL_API_KEY},
-                    params={"trackingNumber": tracking_number},
-                    timeout=30,
+        # Skip numbers we already failed on this run (avoids duplicate retries).
+        if tracking_number in DHLTracker._failed_numbers:
+            return DHLTracker._failed_numbers[tracking_number]
+
+        # If the quota looks exhausted, stop hammering DHL for the rest of the run.
+        if DHLTracker._quota_exhausted:
+            return normalize_result("unknown", error="DHL quota exhausted (429)")
+
+        self._throttle()
+        try:
+            resp = requests.get(
+                self.TRACK_URL,
+                headers={"DHL-API-Key": DHL_API_KEY},
+                params={"trackingNumber": tracking_number},
+                timeout=20,
+            )
+
+            if resp.status_code == 429:
+                DHLTracker._consecutive_429 += 1
+                logger.warning(
+                    "DHL 429 (rate limit/quota) for %s; not retrying (%d in a row)",
+                    tracking_number, DHLTracker._consecutive_429,
                 )
-
-                if resp.status_code == 429:
-                    # Respect Retry-After if present, else exponential backoff.
-                    retry_after = resp.headers.get("Retry-After")
-                    try:
-                        wait = float(retry_after) if retry_after else 0
-                    except (ValueError, TypeError):
-                        wait = 0
-                    if wait <= 0:
-                        wait = 1.5 * (2 ** attempt)
-                    wait = min(wait, 8.0)
-                    last_error = "429 Too Many Requests"
+                result = normalize_result("unknown", error="429 Too Many Requests")
+                DHLTracker._failed_numbers[tracking_number] = result
+                if DHLTracker._consecutive_429 >= DHLTracker._QUOTA_429_THRESHOLD:
+                    DHLTracker._quota_exhausted = True
                     logger.warning(
-                        "DHL 429 for %s (attempt %d/%d); backing off %.1fs",
-                        tracking_number, attempt + 1, self.MAX_RETRIES, wait,
+                        "DHL quota appears exhausted after %d consecutive 429s; "
+                        "skipping remaining DHL lookups this run.",
+                        DHLTracker._consecutive_429,
                     )
-                    time.sleep(wait)
-                    continue
+                return result
 
-                if resp.status_code == 404:
-                    return normalize_result("not_found")
+            if resp.status_code == 404:
+                DHLTracker._consecutive_429 = 0
+                return normalize_result("not_found")
 
-                resp.raise_for_status()
-                data = resp.json()
+            resp.raise_for_status()
+            DHLTracker._consecutive_429 = 0
+            data = resp.json()
 
-                shipments = data.get("shipments", [])
-                if not shipments:
-                    return normalize_result("not_found")
+            shipments = data.get("shipments", [])
+            if not shipments:
+                return normalize_result("not_found")
 
-                shipment = shipments[0]
-                status_obj = shipment.get("status", {})
-                status_code = status_obj.get("statusCode", "").lower()
-                raw_status = status_obj.get("description", "")
-                location = (status_obj.get("location", {})
-                            .get("address", {})
-                            .get("addressLocality", ""))
+            shipment = shipments[0]
+            status_obj = shipment.get("status", {})
+            status_code = status_obj.get("statusCode", "").lower()
+            raw_status = status_obj.get("description", "")
+            location = (status_obj.get("location", {})
+                        .get("address", {})
+                        .get("addressLocality", ""))
 
-                status_map = {
-                    "delivered": "delivered",
-                    "transit": "in_transit",
-                    "failure": "exception",
-                    "pre-transit": "label_created",
-                    "unknown": "unknown",
-                }
-                status = status_map.get(status_code, "in_transit")
+            status_map = {
+                "delivered": "delivered",
+                "transit": "in_transit",
+                "failure": "exception",
+                "pre-transit": "label_created",
+                "unknown": "unknown",
+            }
+            status = status_map.get(status_code, "in_transit")
 
-                delivery_date = ""
-                if status == "delivered":
-                    ts = status_obj.get("timestamp", "")
-                    if ts:
-                        delivery_date = ts[:10]
-                elif shipment.get("estimatedTimeOfDelivery"):
-                    etd = shipment["estimatedTimeOfDelivery"]
-                    delivery_date = etd[:10] if isinstance(etd, str) else ""
+            delivery_date = ""
+            if status == "delivered":
+                ts = status_obj.get("timestamp", "")
+                if ts:
+                    delivery_date = ts[:10]
+            elif shipment.get("estimatedTimeOfDelivery"):
+                etd = shipment["estimatedTimeOfDelivery"]
+                delivery_date = etd[:10] if isinstance(etd, str) else ""
 
-                return normalize_result(status, delivery_date, location, raw_status)
+            return normalize_result(status, delivery_date, location, raw_status)
 
-            except requests.exceptions.HTTPError as e:
-                code = e.response.status_code if e.response is not None else None
-                if code == 404:
-                    return normalize_result("not_found")
-                last_error = str(e)
-                logger.error("DHL tracking error for %s: %s", tracking_number, e)
-                break
-            except Exception as e:
-                last_error = str(e)
-                logger.error("DHL tracking error for %s: %s", tracking_number, e)
-                break
-
-        # All retries exhausted (or hard error): keep the row visible, don't crash.
-        logger.warning("DHL giving up on %s after retries: %s", tracking_number, last_error)
-        return normalize_result("unknown", error=last_error or "DHL unavailable")
+        except requests.exceptions.HTTPError as e:
+            code = e.response.status_code if e.response is not None else None
+            if code == 404:
+                return normalize_result("not_found")
+            logger.error("DHL tracking error for %s: %s", tracking_number, e)
+            return normalize_result("unknown", error=str(e))
+        except Exception as e:
+            logger.error("DHL tracking error for %s: %s", tracking_number, e)
+            return normalize_result("unknown", error=str(e))
 
 # =============================================================================
 # SF Express (順豐) -- public international tracking endpoint (no API key)
@@ -551,7 +558,7 @@ class SFExpressTracker:
                 "Referer": "https://www.sf-international.com/",
             }
             resp = requests.post(
-                self.ROUTE_URL, headers=headers, json=payload, timeout=30
+                self.ROUTE_URL, headers=headers, json=payload, timeout=12
             )
             if resp.status_code != 200:
                 return normalize_result("unknown",
