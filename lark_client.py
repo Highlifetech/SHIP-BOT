@@ -1,16 +1,13 @@
 """
 Lark API Client
 
-Handles authentication, reading/writing Lark Sheets, and sending
-group chat messages.
+Per-spreadsheet column layout: read_tracking_data(), read_all_status_rows(),
+update_tracking_row() and the status styling helpers resolve column positions
+via config.columns_for(token) so spreadsheets with a shifted layout (e.g. the
+Other Inbound sheet) are read and written using the correct columns.
 
-Supports both scheduled runs and @mention triggers from Lark chat.
-
-Sheet structure note:
-    Many shipment groups span multiple rows (one row per customer/order).
-    The Shipment ID, Tracking #, Carrier, and Num Boxes columns are only filled
-    on the FIRST row of each group - sub-rows leave them blank and inherit the
-    values from the row above.  read_tracking_data() carries those fields forward.
+Shipment groups span multiple rows; Shipment ID / Tracking # / Carrier / Num
+Boxes are filled only on the first row of a group and carried forward.
 """
 
 import json
@@ -29,13 +26,14 @@ from config import (
     HEADER_ROW,
     SKIP_TABS,
     SHEET_OWNERS,
+    columns_for,
+    col_to_index,
 )
 
 logger = logging.getLogger(__name__)
 
 PERMANENT_TABS = ["Hannah", "Lucy", "Other"]
 
-# Display names for section headers (uppercase style)
 SECTION_DISPLAY = {
     "Hannah": "HANNAH",
     "Lucy": "LUCY",
@@ -44,8 +42,6 @@ SECTION_DISPLAY = {
 
 
 class LarkClient:
-    """Client for Lark Suite API (Sheets + Messaging)."""
-
     def __init__(self):
         self.base_url = LARK_BASE_URL.rstrip("/")
         self.token = None
@@ -128,6 +124,23 @@ class LarkClient:
         return rows
 
     def read_tracking_data(self, spreadsheet_token, sheet_id):
+        cols = columns_for(spreadsheet_token)
+        i_shipment = col_to_index(cols.get("shipment_id", ""))
+        i_vendor = col_to_index(cols.get("vendor", ""))
+        i_recipient = col_to_index(cols.get("recipient", ""))
+        i_order = col_to_index(cols.get("order_num", ""))
+        i_customer = col_to_index(cols.get("customer", ""))
+        i_tracking = col_to_index(cols.get("tracking_num", ""))
+        i_carrier = col_to_index(cols.get("carrier", ""))
+        i_status = col_to_index(cols.get("status", ""))
+        i_num_boxes = col_to_index(cols.get("num_boxes", ""))
+        i_delivery = col_to_index(cols.get("delivery_date", ""))
+
+        def cell(row, idx):
+            if idx is None or idx < 0 or idx >= len(row):
+                return ""
+            return str(row[idx] or "").strip()
+
         start_row = HEADER_ROW + 1
         rows = self.read_sheet_range(
             spreadsheet_token, sheet_id,
@@ -148,10 +161,10 @@ class LarkClient:
             while len(row) < MIN_COLS:
                 row.append("")
 
-            shipment_id_raw = str(row[0] or "").strip()
-            tracking_raw = str(row[7] or "").strip()
-            carrier_raw = str(row[8] or "").strip()
-            num_boxes_raw = str(row[15] or "").strip()
+            shipment_id_raw = cell(row, i_shipment)
+            tracking_raw = cell(row, i_tracking)
+            carrier_raw = cell(row, i_carrier)
+            num_boxes_raw = cell(row, i_num_boxes)
 
             shipment_id = shipment_id_raw or last_shipment_id
             tracking = tracking_raw or last_tracking
@@ -184,16 +197,16 @@ class LarkClient:
                 )
                 continue
 
-            status_raw = str(row[13] or "").strip()
-            delivery_raw = str(row[17] or "").strip()
+            status_raw = cell(row, i_status)
+            delivery_raw = cell(row, i_delivery)
 
             results.append({
                 "row_num": start_row + i,
                 "shipment_id": shipment_id,
-                "vendor": str(row[1] or "").strip(),
-                "recipient": str(row[2] or "").strip(),
-                "customer": str(row[4] or "").strip(),
-                "order_num": str(row[3] or "").strip(),
+                "vendor": cell(row, i_vendor),
+                "recipient": cell(row, i_recipient),
+                "customer": cell(row, i_customer),
+                "order_num": cell(row, i_order),
                 "tracking_num": tracking,
                 "carrier": carrier,
                 "num_boxes": num_boxes,
@@ -205,19 +218,15 @@ class LarkClient:
         return results
 
     def read_all_status_rows(self, spreadsheet_token, sheet_id):
-        """Read every row with a non-empty status value in column M.
+        """Read every row with a non-empty status value in the status column.
 
-        Unlike read_tracking_data() which requires a tracking number + carrier,
-        this method returns ALL rows that have any status set -- including rows
-        in Hannah/Lucy/Other tabs that have no tracking number (e.g. manual
-        status entries, fully delivered rows with cleared tracking, sub-rows
-        that inherit tracking from above, etc.).
-
+        The status column letter is resolved per-spreadsheet via columns_for().
         Returns a list of dicts with keys: row_num, current_status.
         """
+        cols = columns_for(spreadsheet_token)
+        status_col = cols.get("status", "N") or "N"
         start_row = HEADER_ROW + 1
-        # Read only column M (status) to keep the request lightweight
-        range_str = f"{sheet_id}!N{start_row}:N500"
+        range_str = f"{sheet_id}!{status_col}{start_row}:{status_col}500"
         url = (
             f"{self.base_url}/open-apis/sheets/v2/spreadsheets/"
             f"{spreadsheet_token}/values/{range_str}"
@@ -267,75 +276,55 @@ class LarkClient:
                             delivery_date="", num_boxes=""):
         """Update delivery date and num_boxes for a tracking row.
 
-        NOTE: We intentionally do NOT write to the status column (M).
-        The Lark values_batch_update API writes plain text which overwrites
-        the dropdown widget and destroys the color-coded formatting.
-        Users manage the status dropdown manually.
+        NOTE: We intentionally do NOT write to the status column to preserve
+        the Lark dropdown widget and its color formatting. Column positions
+        are resolved per-spreadsheet via columns_for().
         """
+        cols = columns_for(spreadsheet_token)
+        delivery_col = cols.get("delivery_date", "")
+        num_boxes_col = cols.get("num_boxes", "")
         updates = []
-        if delivery_date:
-            updates.append({"row": row_num, "col": COLUMNS["delivery_date"], "value": delivery_date})
-        if num_boxes:
-            updates.append({"row": row_num, "col": COLUMNS["num_boxes"], "value": str(num_boxes)})
+        if delivery_date and delivery_col:
+            updates.append({"row": row_num, "col": delivery_col, "value": delivery_date})
+        if num_boxes and num_boxes_col:
+            updates.append({"row": row_num, "col": num_boxes_col, "value": str(num_boxes)})
         if updates:
             self.write_cells(spreadsheet_token, sheet_id, updates)
 
-
-    # ------------------------------------------------------------------
-    # Conditional formatting (cell background color)
-    # ------------------------------------------------------------------
-    # Background hex colors for the Status cell (column M).
-    # Applied via styles_batch_update which sets color WITHOUT touching
-    # the cell value, so the dropdown widget is fully preserved.
-    #
-    #   Label Created/Not Scanned  ->  Light Red   #FF6B6B
-    #   In Transit                 ->  Blue        #1677FF
-    #   Delivered                  ->  Green       #00B96B
-    #   Exception/Delay            ->  Orange      #FA8C16
     STATUS_CELL_COLORS = {
-        "Label Created/Not Scanned": "#FF6B6B",  # light red
-        "In Transit":                "#1677FF",  # blue
-        "Delivered":                 "#00B96B",  # strong green
-        "Exception/Delay":           "#FA8C16",  # orange
+        "Label Created/Not Scanned": "#FF6B6B",
+        "In Transit": "#1677FF",
+        "Delivered": "#00B96B",
+        "Exception/Delay": "#FA8C16",
     }
 
     def set_status_cell_style(self, spreadsheet_token, sheet_id, row_num, status_value):
-        """Apply a background color to the Status cell (column M) for a given row.
-
-        Uses the Lark Sheets styles_batch_update API which sets cell formatting
-        WITHOUT overwriting the cell value, so the dropdown widget and its
-        selected option are both preserved.
-        """
+        """Apply a background color to the Status cell for a given row."""
+        cols = columns_for(spreadsheet_token)
+        status_col = cols.get("status", "N") or "N"
         color_hex = self.STATUS_CELL_COLORS.get(status_value)
         if not color_hex:
-            logger.warning(
-                "set_status_cell_style: unknown status '%s', skipping", status_value
-            )
+            logger.warning("set_status_cell_style: unknown status %r, skipping", status_value)
             return
-        range_str = f"{sheet_id}!N{row_num}:N{row_num}"
+        range_str = f"{sheet_id}!{status_col}{row_num}:{status_col}{row_num}"
         self._apply_cell_background(spreadsheet_token, [range_str], color_hex)
 
     def set_status_styles_batch(self, spreadsheet_token, sheet_id, row_status_pairs):
-        """Apply background colors to multiple Status cells in a single API call.
-
-        Args:
-            spreadsheet_token: The Lark spreadsheet token
-            sheet_id: The sheet tab ID
-            row_status_pairs: list of (row_num, status_value) tuples
-        """
+        """Apply background colors to multiple Status cells in a single API call."""
         if not row_status_pairs:
             return
-        # Group rows by color so we can batch ranges with the same color
+        cols = columns_for(spreadsheet_token)
+        status_col = cols.get("status", "N") or "N"
         by_color = {}
         for row_num, status_value in row_status_pairs:
             color_hex = self.STATUS_CELL_COLORS.get(status_value)
             if not color_hex:
                 logger.warning(
-                    "set_status_styles_batch: unknown status '%s' for row %d, skipping",
+                    "set_status_styles_batch: unknown status %r for row %d, skipping",
                     status_value, row_num,
                 )
                 continue
-            by_color.setdefault(color_hex, []).append(f"{sheet_id}!N{row_num}:N{row_num}")
+            by_color.setdefault(color_hex, []).append(f"{sheet_id}!{status_col}{row_num}:{status_col}{row_num}")
 
         for color_hex, ranges in by_color.items():
             self._apply_cell_background(spreadsheet_token, ranges, color_hex)
@@ -366,14 +355,9 @@ class LarkClient:
                     ranges, color_hex, data.get("code"), data.get("msg"),
                 )
             else:
-                logger.info(
-                    "Applied background %s to %d range(s)", color_hex, len(ranges)
-                )
+                logger.info("Applied background %s to %d range(s)", color_hex, len(ranges))
         except Exception as e:
             logger.error("_apply_cell_background failed: %s", e)
-    # ------------------------------------------------------------------
-    # Messaging
-    # ------------------------------------------------------------------
 
     def send_group_message(self, message, chat_id=None, message_id=None):
         """Send message to Lark group. Falls back to plain text if card fails."""
@@ -409,7 +393,7 @@ class LarkClient:
         resp.raise_for_status()
         data = resp.json()
         if data.get("code") != 0:
-            raise Exception(f"Card send failed: code={data.get('code')} msg={data.get('msg')}")
+            raise Exception("Card send failed: code=%s msg=%s" % (data.get("code"), data.get("msg")))
         logger.info("Interactive card sent to group chat")
 
     def _send_text(self, message, chat_id, message_id=None):
@@ -428,7 +412,7 @@ class LarkClient:
         resp.raise_for_status()
         data = resp.json()
         if data.get("code") != 0:
-            raise Exception(f"Text send failed: code={data.get('code')} msg={data.get('msg')}")
+            raise Exception("Text send failed: code=%s msg=%s" % (data.get("code"), data.get("msg")))
         logger.info("Plain text message sent to group chat")
 
     def _build_card_message(self, text_content):
@@ -454,13 +438,9 @@ class LarkClient:
         }
         return json.dumps(card)
 
-    # ------------------------------------------------------------------
-    # Date formatting helpers
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _format_delivery_date_long(raw_date):
-        """Format a date as 'Thursday, March 26th 2026' style for the chat message."""
+        """Format a date as Thursday, March 26th 2026 style for the chat message."""
         if not raw_date:
             return ""
         clean = raw_date.strip()[:10]
@@ -519,10 +499,6 @@ class LarkClient:
             return all("DELIVERED" in p.get("status", "").upper() for p in packages)
         return status == "DELIVERED"
 
-    # ------------------------------------------------------------------
-    # Tracking URL helper
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _tracking_url(tracking, carrier):
         """Return a clickable tracking URL for the given carrier."""
@@ -537,24 +513,15 @@ class LarkClient:
             return f"https://www.dhl.com/en/express/tracking.html?AWB={tracking}"
         return ""
 
-    # ------------------------------------------------------------------
-    # Shipment line formatting for the chat message
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _shipment_line(r):
-        """Format one shipment line for the daily summary.
-
-        Format: - **tracking#** -- customer -- last status / location -- delivery info
-        Tracking numbers are bold links.  Each line is a bullet point.
-        """
+        """Format one shipment line for the daily summary."""
         tracking = r.get("tracking_num", "N/A")
         order = r.get("order_num", "").strip()
         customer = r.get("customer", "").strip()
         recipient = r.get("recipient", "").strip()
         carrier = r.get("carrier", "").strip()
 
-        # Determine the display name
         if recipient.upper() == "BRENDAN":
             name = "Brendan"
         elif recipient.upper() == "CUSTOMER DIRECT":
@@ -568,11 +535,9 @@ class LarkClient:
         delivery = r.get("delivery_date", "").strip()
         packages = r.get("packages", [])
 
-        # Build a clickable tracking link if a URL is available
         url = LarkClient._tracking_url(tracking, carrier)
         tracking_display = f"[**{tracking}**]({url})" if url else f"**{tracking}**"
 
-        # ---- UPS multi-box: detailed per-box breakdown ----
         if packages and len(packages) > 1:
             total = len(packages)
             delivered = [p for p in packages if "DELIVERED" in p.get("status", "").upper()]
@@ -601,7 +566,6 @@ class LarkClient:
             box_summary = ", ".join(parts)
             return f"- {tracking_display} ({total} boxes) -- {name} -- {box_summary}"
 
-        # ---- Build status + location description ----
         if status == "DELIVERED":
             if delivery:
                 date_str = LarkClient._format_delivery_date_long(delivery)
@@ -616,7 +580,6 @@ class LarkClient:
         elif status == "LABEL CREATED/NOT SCANNED":
             status_desc = "label created - not yet scanned"
         else:
-            # IN TRANSIT or other
             if raw_status and location:
                 status_desc = f"{raw_status.lower()} in {location}"
             elif location:
@@ -626,7 +589,6 @@ class LarkClient:
             else:
                 status_desc = "in transit"
 
-        # ---- Build delivery date portion ----
         if status == "DELIVERED":
             date_desc = ""
         elif delivery:
@@ -640,36 +602,16 @@ class LarkClient:
 
         return f"- {tracking_display} -- {order} -- {name} -- {status_desc}{date_desc}"
 
-        # ------------------------------------------------------------------
-    # Daily summary
-    # ------------------------------------------------------------------
-
     def send_daily_summary(self, all_results, chat_id=None, message_id=None):
-        """Send the shipment summary card to the Lark group chat.
-
-        Format:
-            HLT Shipment Tracker
-            -- HANNAH --
-            __FEDEX__
-            - **tracking** -- customer -- status/location -- delivery date
-            ...
-            __UPS__
-            ...
-            -- LUCY --
-            ...
-            -- OTHER --
-            ...
-        """
-        # Only show non-delivered shipments
+        """Send the shipment summary card to the Lark group chat."""
         active = [r for r in all_results if not LarkClient._is_fully_delivered(r)]
         if not active:
             self.send_group_message(
-                "All shipments delivered.  Nothing to track.",
+                "All shipments delivered. Nothing to track.",
                 chat_id=chat_id, message_id=message_id,
             )
             return
 
-        # Deduplicate by tracking number
         seen, unique = set(), []
         for r in active:
             tn = r.get("tracking_num", "").strip()
@@ -677,7 +619,6 @@ class LarkClient:
                 seen.add(tn)
                 unique.append(r)
 
-        # Group by sheet owner (Hannah / Lucy / Other)
         buckets = {tab: [] for tab in PERMANENT_TABS}
         for r in unique:
             section = self._section_for(r)
@@ -692,13 +633,11 @@ class LarkClient:
             if not items:
                 lines.append("No active shipments")
                 return
-            # Sub-group by carrier
             by_carrier = {}
             for r in items:
                 c = r.get("carrier", "").strip().upper() or "UNKNOWN"
                 by_carrier.setdefault(c, []).append(r)
             for carrier in sorted(by_carrier):
-                # Underline carrier names using unicode combining low line (\u0332)
                 lines.append(NL + "".join(c + "\u0332" for c in carrier))
                 for r in by_carrier[carrier]:
                     lines.append(LarkClient._shipment_line(r))
@@ -710,10 +649,6 @@ class LarkClient:
             NL.join(lines),
             chat_id=chat_id, message_id=message_id,
         )
-
-    # ------------------------------------------------------------------
-    # Exception alerts
-    # ------------------------------------------------------------------
 
     def send_exception_alerts(self, alerts, chat_id=None):
         """Send a red-banner alert card for newly detected shipping exceptions."""
