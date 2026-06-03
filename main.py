@@ -235,6 +235,7 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
                 [t["title"] for t in tabs_to_process], spreadsheet_token)
 
     sibling_skip = set()
+    track_cache = {}  # (carrier, tracking_num) -> tracker.track() result (one API call per unique number)
 
     for tab in tabs_to_process:
         tab_title = tab["title"]
@@ -277,7 +278,12 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
                 })
                 continue
 
-            result = tracker.track(tracking_num, carrier)
+            cache_key = (carrier, tracking_num)
+            if cache_key in track_cache:
+                result = track_cache[cache_key]
+            else:
+                result = tracker.track(tracking_num, carrier)
+                track_cache[cache_key] = result
             new_status = result["status"]
             delivery_date = result.get("delivery_date", "")
             raw_status = result.get("raw_status", "")
