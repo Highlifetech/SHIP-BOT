@@ -61,7 +61,7 @@ COLUMNS = {
     "tariff_charge": "O",
     "num_boxes": "P",
     "notes": "Q",
-        "delivery_date": "R",
+    "delivery_date": "R",
 }
 
 # Header row (1-indexed) -- data starts on the row after this
@@ -108,6 +108,14 @@ CARRIER_ALIASES = {
     "royalmail": "royalmail",
     "royal": "royalmail",
     "rm": "royalmail",
+    # SF Express (Shun Feng)
+    "sf express": "sfexpress",
+    "sf-express": "sfexpress",
+    "sfexpress": "sfexpress",
+    "sf": "sfexpress",
+    "shunfeng": "sfexpress",
+    "shun feng": "sfexpress",
+    "sf international": "sfexpress",
 }
 
 # Status values the bot writes to the sheet (column M)
@@ -124,7 +132,6 @@ STATUS_MAP = {
     "unknown": "Label Created/Not Scanned",
     "not_found": "Label Created/Not Scanned",
 }
-
 
 # =============================================================================
 # PER-SPREADSHEET COLUMN OVERRIDES
@@ -157,7 +164,6 @@ SHEET_COLUMN_OVERRIDES = {
     },
 }
 
-
 def columns_for(spreadsheet_token):
     """Return the column-letter map for a spreadsheet, merging any override."""
     merged = dict(COLUMNS)
@@ -165,7 +171,6 @@ def columns_for(spreadsheet_token):
     if override:
         merged.update(override)
     return merged
-
 
 def col_to_index(col_letter):
     """Convert a column letter (A, B, ... AA) to a 0-based index, or None."""
