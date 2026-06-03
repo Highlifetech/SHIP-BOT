@@ -149,7 +149,7 @@ class LarkClient:
                 row.append("")
 
             shipment_id_raw = str(row[0] or "").strip()
-            tracking_raw = str(row[6] or "").strip()
+            tracking_raw = str(row[7] or "").strip()
             carrier_raw = str(row[8] or "").strip()
             num_boxes_raw = str(row[15] or "").strip()
 
@@ -549,6 +549,7 @@ class LarkClient:
         Tracking numbers are bold links.  Each line is a bullet point.
         """
         tracking = r.get("tracking_num", "N/A")
+        order = r.get("order_num", "").strip()
         customer = r.get("customer", "").strip()
         recipient = r.get("recipient", "").strip()
         carrier = r.get("carrier", "").strip()
@@ -637,7 +638,7 @@ class LarkClient:
             else:
                 date_desc = ""
 
-        return f"- {tracking_display} -- {name} -- {status_desc}{date_desc}"
+        return f"- {tracking_display} -- {order} -- {name} -- {status_desc}{date_desc}"
 
         # ------------------------------------------------------------------
     # Daily summary
