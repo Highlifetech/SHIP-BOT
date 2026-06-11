@@ -108,6 +108,51 @@ class LarkClient:
         logger.info("Found %d processable tabs in %s", len(result), spreadsheet_token)
         return result
 
+    def list_folder_sheets(self, folder_token, _depth=0):
+        """Recursively list spreadsheets in a Lark Drive folder.
+
+        Returns [{"token": ..., "name": ...}]. Subfolders are followed only
+        when their name contains "SHIP" so quote/invoice folders are skipped.
+        Failures are logged and return what was found so the static
+        LARK_SHEET_TOKENS list keeps working. Requires the Lark app to have
+        a Drive read scope (drive:drive:readonly).
+        """
+        results = []
+        if _depth > 3:
+            return results
+        page_token = ""
+        while True:
+            params = {"folder_token": folder_token, "page_size": 200}
+            if page_token:
+                params["page_token"] = page_token
+            try:
+                resp = requests.get(
+                    f"{self.base_url}/open-apis/drive/v1/files",
+                    headers=self._headers(), params=params, timeout=30,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception as e:
+                logger.error("Folder listing failed for %s: %s", folder_token, e)
+                return results
+            if data.get("code") != 0:
+                logger.error("Folder listing failed for %s: code=%s msg=%s",
+                             folder_token, data.get("code"), data.get("msg"))
+                return results
+            payload = data.get("data", {})
+            for f in payload.get("files", []):
+                ftype = f.get("type", "")
+                name = f.get("name", "")
+                if ftype == "sheet":
+                    results.append({"token": f.get("token", ""), "name": name})
+                elif ftype == "folder" and "SHIP" in name.upper():
+                    results.extend(self.list_folder_sheets(f.get("token", ""), _depth + 1))
+            if payload.get("has_more") and payload.get("next_page_token"):
+                page_token = payload["next_page_token"]
+            else:
+                break
+        return results
+
     def read_sheet_range(self, spreadsheet_token, sheet_id, start_col, end_col,
                          start_row, end_row):
         range_str = f"{sheet_id}!{start_col}{start_row}:{end_col}{end_row}"
@@ -496,7 +541,18 @@ class LarkClient:
         packages = r.get("packages", [])
         status = r.get("new_status", "").upper()
         if packages:
-            return all("DELIVERED" in p.get("status", "").upper() for p in packages)
+            statuses = [p.get("status", "").upper() for p in packages]
+            if all("DELIVERED" in s for s in statuses):
+                return True
+            # Carriers often never scan every box of a multi-piece shipment.
+            # If at least one box arrived and nothing is still moving, treat
+            # the shipment as delivered instead of reporting it forever.
+            delivered_any = any("DELIVERED" in s for s in statuses)
+            still_moving = any(
+                p.get("scanned") and "DELIVERED" not in p.get("status", "").upper()
+                for p in packages
+            )
+            return delivered_any and not still_moving
         return status == "DELIVERED"
 
     @staticmethod
