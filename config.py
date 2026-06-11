@@ -183,3 +183,55 @@ def col_to_index(col_letter):
             return None
         idx = idx * 26 + (ord(ch) - ord("A") + 1)
     return idx - 1
+
+
+# =============================================================================
+# CLIENT SHEET LAYOUT ("2026 HANNAH <CLIENT> SHIPPING LIST" sheets)
+# =============================================================================
+# The per-client sheets in the HANNAH BULK SHIPPING LIST folder share one
+# layout that differs from the main inbound sheets: the header is on row 1
+# and there are no Shipment ID / Vendor / Recipient / Balance Owed / Tariff /
+# Notes columns. Column D (Product Names) is not read by the bot.
+CLIENT_SHEET_COLUMNS = {
+    "shipment_id": "",
+    "vendor": "",
+    "recipient": "",
+    "order_num": "A",
+    "customer": "B",
+    "product_photo": "C",
+    "tracking_num": "E",
+    "carrier": "F",
+    "qty_shipped": "G",
+    "qty_expected": "H",
+    "discrepancy": "I",
+    "balance_owed": "",
+    "status": "J",
+    "tariff_charge": "",
+    "num_boxes": "K",
+    "notes": "",
+    "delivery_date": "L",
+}
+
+CLIENT_SHEET_TOKENS = [
+    "KiHwsMaxnh5Qglt80L5jnB8Dpk6",  # 2026 HANNAH 7BREW COFFEE SHIPPING LIST
+    "T0VlsL1AzhhUHJtjGshj3KOApDc",  # 2026 HANNAH CRAFTWORKS SHIPPING LIST
+    "CNlmswxmjhwm7ttisngjbvM1pvd",  # 2026 HANNAH DENIM TEARS SHIPPING LIST
+    "PG1hsm5ZihC0b9tWUgUjNulIp81",  # 2026 HANNAH LIQUID DEATH SHIPPING LIST
+    "EkGxsuNkchw6hWtjFkxjcInBpaf",  # 2026 HANNAH LIVE FAST DIE YOUNG SHIPPING LIST
+    "UbLasIUomhj3d4tsEwMjoOOupqd",  # 2026 HANNAH PALM TREE CREW SHIPPING LIST
+    "J5EvspVVPhhvWdtFJz0jCAwRpJh",  # 2026 HANNAH STEADY HANDS SHIPPING LIST
+    "Tk4vscdE3hVVO8txOUJjrUFppGc",  # 2026 HANNAH VEES SHIPPING LIST
+    "TGXiss8HGhyJNBtdiLbjOr9appc",  # 2026 HANNAH WILDFANG SHIPPING LIST
+]
+
+for _t in CLIENT_SHEET_TOKENS:
+    SHEET_COLUMN_OVERRIDES[_t] = dict(CLIENT_SHEET_COLUMNS)
+
+# Per-spreadsheet header row overrides -- the client sheets have their header
+# on row 1 (data starts on row 2) instead of the default row 2.
+SHEET_HEADER_ROW_OVERRIDES = {_t: 1 for _t in CLIENT_SHEET_TOKENS}
+
+
+def header_row_for(spreadsheet_token):
+    """Return the header row (1-indexed) for a spreadsheet."""
+    return SHEET_HEADER_ROW_OVERRIDES.get((spreadsheet_token or "").strip(), HEADER_ROW)
