@@ -38,6 +38,7 @@ jobs:
           LARK_CHAT_ID: ${{ secrets.LARK_CHAT_ID }}
           LARK_SHEET_TOKENS: ${{ secrets.LARK_SHEET_TOKENS }}
           LARK_SHEET_OWNERS: ${{ secrets.LARK_SHEET_OWNERS }}
+          LARK_FOLDER_TOKENS: ${{ secrets.LARK_FOLDER_TOKENS }}
           FEDEX_API_KEY: ${{ secrets.FEDEX_API_KEY }}
           FEDEX_SECRET_KEY: ${{ secrets.FEDEX_SECRET_KEY }}
           UPS_CLIENT_ID: ${{ secrets.UPS_CLIENT_ID }}
