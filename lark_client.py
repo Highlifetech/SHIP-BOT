@@ -27,7 +27,7 @@ from config import (
     SKIP_TABS,
     SHEET_OWNERS,
     columns_for,
-    col_to_index,
+    col_to_index, header_row_for,
 )
 
 logger = logging.getLogger(__name__)
@@ -141,7 +141,7 @@ class LarkClient:
                 return ""
             return str(row[idx] or "").strip()
 
-        start_row = HEADER_ROW + 1
+        start_row = header_row_for(spreadsheet_token) + 1
         rows = self.read_sheet_range(
             spreadsheet_token, sheet_id,
             start_col="A", end_col="R",
@@ -225,7 +225,7 @@ class LarkClient:
         """
         cols = columns_for(spreadsheet_token)
         status_col = cols.get("status", "N") or "N"
-        start_row = HEADER_ROW + 1
+        start_row = header_row_for(spreadsheet_token) + 1
         range_str = f"{sheet_id}!{status_col}{start_row}:{status_col}500"
         url = (
             f"{self.base_url}/open-apis/sheets/v2/spreadsheets/"
@@ -641,7 +641,7 @@ class LarkClient:
         buckets = {tab: [] for tab in PERMANENT_TABS}
         for r in unique:
             section = self._section_for(r)
-            buckets[section].append(r)
+            buckets.setdefault(section, []).append(r)
 
         NL = chr(10)
         lines = ["**HLT Shipment Tracker**"]
@@ -663,6 +663,12 @@ class LarkClient:
 
         for tab_name in PERMANENT_TABS:
             render_section(tab_name, buckets[tab_name])
+
+        # Client sheet sections (owners beyond Hannah/Lucy/Other) render
+        # below the permanent sections, only when they have active shipments.
+        for tab_name in sorted(s for s in buckets if s not in PERMANENT_TABS):
+            if buckets[tab_name]:
+                render_section(tab_name, buckets[tab_name])
 
         self.send_group_message(
             NL.join(lines),
