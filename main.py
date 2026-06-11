@@ -33,7 +33,7 @@ import logging
 import time
 from datetime import datetime, timezone, timedelta
 
-from config import SHEET_TOKENS, CARRIER_ALIASES, SHEET_OWNERS, STATUS_MAP, COLUMNS
+from config import SHEET_TOKENS, CARRIER_ALIASES, SHEET_OWNERS, STATUS_MAP, COLUMNS, FOLDER_TOKENS, register_client_sheet
 from lark_client import LarkClient
 from carriers import CarrierTracker, _fmt_date
 
@@ -261,6 +261,11 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
             if current_status in DONE_STATUSES:
                 continue
 
+            # A delivery date already in the sheet means the shipment
+            # arrived -- do not keep re-tracking or re-reporting it.
+            if row.get("delivery_date", "").strip():
+                continue
+
             if tracking_num in sibling_skip:
                 continue
 
@@ -405,8 +410,25 @@ def style_all_sheets(lark, dry_run=False):
                 except Exception as e:
                     logger.error("  Batch style failed for '%s': %s", tab_title, e)
 
+def _owner_from_title(title):
+    """Derive a chat-message section name from a spreadsheet title.
+
+    2026 HANNAH 7BREW COFFEE SHIPPING LIST -> Hannah 7Brew Coffee
+    """
+    t = "".join(ch for ch in (title or "") if ch.isprintable())
+    upper = t.upper()
+    for noise in ["SHIPPING LIST", "INBOUND SHIPMENTS TRACKER",
+                  "INBOUND SHIPMENTS", "SHIPPING SHEET", "TRACKER"]:
+        idx = upper.find(noise)
+        if idx != -1:
+            t = t[:idx] + t[idx + len(noise):]
+            upper = t.upper()
+    words = [w for w in t.split() if not w.isdigit()]
+    return " ".join(w.title() for w in words).strip()
+
+
 def run_tracker(dry_run=False, chat_id=None, message_id=None):
-    if not SHEET_TOKENS:
+    if not SHEET_TOKENS and not FOLDER_TOKENS:
         logger.error("No sheet tokens configured. Set LARK_SHEET_TOKENS env var.")
         return []
 
@@ -414,6 +436,19 @@ def run_tracker(dry_run=False, chat_id=None, message_id=None):
     lark = LarkClient()
     tracker = CarrierTracker()
     all_results = []
+
+    # Auto-discover spreadsheets in the configured Drive folders so new
+    # client sheets are scanned without touching any secrets.
+    for folder_token in FOLDER_TOKENS:
+        for f in lark.list_folder_sheets(folder_token):
+            tok = (f.get("token") or "").strip()
+            if not tok or tok in SHEET_TOKENS:
+                continue
+            SHEET_TOKENS.append(tok)
+            register_client_sheet(tok)
+            if tok not in SHEET_OWNERS:
+                SHEET_OWNERS[tok] = _owner_from_title(f.get("name", "")) or "Other"
+            logger.info("Discovered sheet %s (%s)", f.get("name", ""), tok)
 
     for token in SHEET_TOKENS:
         logger.info("Processing spreadsheet: %s", token)
