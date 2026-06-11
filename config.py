@@ -235,3 +235,30 @@ SHEET_HEADER_ROW_OVERRIDES = {_t: 1 for _t in CLIENT_SHEET_TOKENS}
 def header_row_for(spreadsheet_token):
     """Return the header row (1-indexed) for a spreadsheet."""
     return SHEET_HEADER_ROW_OVERRIDES.get((spreadsheet_token or "").strip(), HEADER_ROW)
+
+
+# =============================================================================
+# FOLDER AUTO-DISCOVERY
+# =============================================================================
+# Comma-separated Lark Drive folder tokens (GitHub Secret: LARK_FOLDER_TOKENS).
+# Every run the bot lists these folders and scans any spreadsheet it finds,
+# in addition to LARK_SHEET_TOKENS. Subfolders are followed only when their
+# name contains "SHIP" (e.g. "HANNAH BULK SHIPPING LIST") so quote/invoice
+# folders are left alone. Newly discovered sheets are assumed to use the
+# client sheet template layout above.
+FOLDER_TOKENS = [
+    t.strip()
+    for t in os.environ.get("LARK_FOLDER_TOKENS", "").split(",")
+    if t.strip()
+]
+
+
+def register_client_sheet(token):
+    """Apply the client-sheet template layout to a discovered spreadsheet."""
+    token = (token or "").strip()
+    if not token:
+        return
+    if token not in SHEET_COLUMN_OVERRIDES:
+        SHEET_COLUMN_OVERRIDES[token] = dict(CLIENT_SHEET_COLUMNS)
+    if token not in SHEET_HEADER_ROW_OVERRIDES:
+        SHEET_HEADER_ROW_OVERRIDES[token] = 1
