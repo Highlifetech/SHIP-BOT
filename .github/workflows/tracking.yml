@@ -2,10 +2,10 @@ name: Shipment Tracking Bot
 
 on:
   schedule:
-        # 8:00 AM EST (13:00 UTC)
-        - cron: '0 13 * * *'
-        # 8:00 PM EST (01:00 UTC)
-        - cron: '0 1 * * *'
+    # 8:00 AM EST (13:00 UTC)
+    - cron: '0 13 * * *'
+    # 8:00 PM EST (01:00 UTC)
+    - cron: '0 1 * * *'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -30,12 +30,29 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # --- Scan-history state (for stuck / customs-hold detection) ---------
+      # The stuck detector compares each shipment's status between runs, so it
+      # needs the previous run's state file. We restore the most recent saved
+      # state here and save the updated file at the end of the job. The key is
+      # unique per run (so the save always succeeds) and restore-keys grabs the
+      # latest previous state by prefix. Runs every 12h keep the cache warm so
+      # it is never evicted (caches drop after 7 unused days).
+      - name: Restore scan-history state
+        uses: actions/cache/restore@v4
+        with:
+          path: state/scan_state.json
+          key: shipbot-scan-state-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            shipbot-scan-state-
+
       - name: Run full tracking summary
         env:
           LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
           LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
           LARK_BASE_URL: ${{ secrets.LARK_BASE_URL }}
           LARK_CHAT_ID: ${{ secrets.LARK_CHAT_ID }}
+          # New: founders channel for stuck / customs-hold alerts.
+          LARK_FOUNDERS_CHAT_ID: ${{ secrets.LARK_FOUNDERS_CHAT_ID }}
           LARK_SHEET_TOKENS: ${{ secrets.LARK_SHEET_TOKENS }}
           LARK_SHEET_OWNERS: ${{ secrets.LARK_SHEET_OWNERS }}
           LARK_FOLDER_TOKENS: ${{ secrets.LARK_FOLDER_TOKENS }}
@@ -46,4 +63,18 @@ jobs:
           USPS_CLIENT_ID: ${{ secrets.USPS_CLIENT_ID }}
           USPS_CLIENT_SECRET: ${{ secrets.USPS_CLIENT_SECRET }}
           DHL_API_KEY: ${{ secrets.DHL_API_KEY }}
+          # Where the detector reads/writes its state (matches the cache path).
+          SCAN_STATE_PATH: state/scan_state.json
+          # --- Optional tuning (defaults shown; override via repo secrets) ---
+          # STUCK_DAYS: '3'
+          # STUCK_ESCALATE_DAYS: '7'
+          # NO_MOVE_MIN_OBS: '2'
+          # CUSTOMS_MIN_OBS: '2'
         run: python main.py ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+
+      - name: Save scan-history state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state/scan_state.json
+          key: shipbot-scan-state-${{ github.run_id }}-${{ github.run_attempt }}
