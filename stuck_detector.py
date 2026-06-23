@@ -62,7 +62,7 @@ try:
         STATE_PRUNE_DAYS,
     )
 except Exception:  # pragma: no cover - fallbacks for standalone/testing
-    LARK_FOUNDERS_CHAT_ID = os.environ.get("LARK_FOUNDERS_CHAT_ID", "")
+    LARK_FOUNDERS_CHAT_ID = os.environ.get("LARK_CHAT_ID_FOUNDERS", "")
     SCAN_STATE_PATH = os.environ.get("SCAN_STATE_PATH", "state/scan_state.json")
     STUCK_DAYS = float(os.environ.get("STUCK_DAYS", "3"))
     STUCK_ESCALATE_DAYS = float(os.environ.get("STUCK_ESCALATE_DAYS", "7"))
