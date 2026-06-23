@@ -35,6 +35,7 @@ from datetime import datetime, timezone, timedelta
 
 from config import SHEET_TOKENS, CARRIER_ALIASES, SHEET_OWNERS, STATUS_MAP, COLUMNS, FOLDER_TOKENS, register_client_sheet
 from lark_client import LarkClient
+from stuck_detector import run_stuck_detection
 from carriers import CarrierTracker, _fmt_date
 
 logging.basicConfig(
@@ -467,6 +468,12 @@ def run_tracker(dry_run=False, chat_id=None, message_id=None):
             logger.info("Summary sent to group chat")
         except Exception as e:
             logger.error("Failed to send summary: %s", e)
+
+        # --- Stuck / no-movement / customs-hold detection -> founders channel ---
+        try:
+            run_stuck_detection(all_results, lark)
+        except Exception as e:
+            logger.error("Stuck detection failed: %s", e)
     else:
         logger.info("Dry run complete. Results:")
         for r in all_results:
