@@ -709,7 +709,7 @@ class LarkClient:
 
         def render_section(label, items):
             display = SECTION_DISPLAY.get(label, label.upper())
-            lines.append(NL + NL + "**" + "".join(c + "\u0332" for c in display) + "**")
+            lines.append(NL + NL + "<font color='orange'>**" + "".join(c + "\u0332" for c in display) + "**</font>")
             if not items:
                 lines.append("No active shipments")
                 return
