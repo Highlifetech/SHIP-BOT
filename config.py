@@ -257,11 +257,17 @@ def header_row_for(spreadsheet_token):
 # name contains "SHIP" (e.g. "HANNAH BULK SHIPPING LIST") so quote/invoice
 # folders are left alone. Newly discovered sheets are assumed to use the
 # client sheet template layout above.
-FOLDER_TOKENS = [
-    t.strip()
-    for t in os.environ.get("LARK_FOLDER_TOKENS", "").split(",")
-    if t.strip()
+# Folders always scanned in addition to LARK_FOLDER_TOKENS. Guarantees the
+# big-client bulk folder is auto-discovered -- and any new sheet dropped into
+# it is picked up automatically -- even if the secret is unset.
+_DEFAULT_FOLDER_TOKENS = [
+    "PCJyfztiJlPMkcdYRqhjmPxnplf",  # HANNAH BULK SHIPPING LIST (big clients)
 ]
+
+FOLDER_TOKENS = list(dict.fromkeys(
+    [t.strip() for t in os.environ.get("LARK_FOLDER_TOKENS", "").split(",") if t.strip()]
+    + _DEFAULT_FOLDER_TOKENS
+))
 
 
 def register_client_sheet(token):
