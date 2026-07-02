@@ -720,7 +720,10 @@ class LarkClient:
             for carrier in sorted(by_carrier):
                 lines.append(NL + "".join(c + "\u0332" for c in carrier))
                 for r in sorted(by_carrier[carrier], key=lambda rr: 0 if ("EXCEPTION" in (rr.get("new_status", "") or "").upper() or "DELAY" in (rr.get("new_status", "") or "").upper()) else (1 if "TRANSIT" in (rr.get("new_status", "") or "").upper() else 2)):
-                    lines.append(LarkClient._shipment_line(r))
+                    try:
+                        lines.append(LarkClient._shipment_line(r))
+                    except Exception as e:
+                        logger.error("Skipping bad shipment row: %s", e)
 
         for tab_name in PERMANENT_TABS:
             render_section(tab_name, buckets[tab_name])
