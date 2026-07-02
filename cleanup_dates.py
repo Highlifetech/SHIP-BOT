@@ -36,6 +36,10 @@ DRY_RUN = ("--dry-run" in sys.argv
 
 MAX_DATA_ROWS = 800
 
+# Canonical columns for the main Hannah/Lucy inbound sheets.
+MAIN_DATE_COL = "Q"
+MAIN_NOTES_COL = "R"
+
 # Matches a full date: three numeric parts separated by / - or . (e.g.
 # 7/1/2026, 07-01-2026, 2026.07.01). Requires two separators so partial
 # fractions like "3/4" are ignored.
@@ -49,6 +53,14 @@ def _target_tokens():
         return "hannah" in owner or "lucy" in owner
     main = [t for t in SHEET_TOKENS if hannah_or_lucy(t)]
     return list(dict.fromkeys(main + list(CLIENT_SHEET_TOKENS)))
+
+
+def col_to_idx(letters):
+    """Spreadsheet column letter -> 0-indexed number (A->0, Q->16)."""
+    n = 0
+    for ch in letters:
+        n = n * 26 + (ord(ch.upper()) - 64)
+    return n - 1
 
 
 def idx_to_col(i):
@@ -100,13 +112,17 @@ def cell(row, i):
     return str(row[i]).strip()
 
 
-def process_tab(client, token, owner, sid, title, hrow):
+def process_tab(client, token, owner, sid, title, hrow, is_main):
     rows = client.read_sheet_range(token, sid, "A", "Z", 1, hrow + MAX_DATA_ROWS)
     if not rows or len(rows) < hrow:
         return 0
     header = rows[hrow - 1]
-    date_i = find_col(header, "delivery", "date")
-    notes_i = find_col(header, "note")
+    if is_main:
+        date_i = col_to_idx(MAIN_DATE_COL)
+        notes_i = col_to_idx(MAIN_NOTES_COL)
+    else:
+        date_i = find_col(header, "delivery", "date")
+        notes_i = find_col(header, "note")
     if date_i < 0 and notes_i < 0:
         return 0
     updates = []
@@ -129,12 +145,18 @@ def process_tab(client, token, owner, sid, title, hrow):
             pd = parse_date(notes_val)
             if pd:
                 nf = fmt(pd)
+                safe_to_clear = False
                 if not date_val:
                     updates.append({"col": idx_to_col(date_i),
                                     "row": rownum, "value": nf})
-                stripped = DATE_RE.sub("", notes_val).strip(" ,;-\t").strip()
-                updates.append({"col": idx_to_col(notes_i),
-                                "row": rownum, "value": stripped})
+                    date_val = nf
+                    safe_to_clear = True
+                elif parse_date(date_val):
+                    safe_to_clear = True
+                if safe_to_clear:
+                    stripped = DATE_RE.sub("", notes_val).strip(" ,;-\t").strip()
+                    updates.append({"col": idx_to_col(notes_i),
+                                    "row": rownum, "value": stripped})
     if updates:
         logger.info("%s / %s -- %d change(s):", owner, title, len(updates))
         for u in updates:
@@ -148,11 +170,22 @@ def main():
     mode = "DRY RUN" if DRY_RUN else "LIVE"
     logger.info("=== Delivery-date cleanup (%s) ===", mode)
     client = LarkClient()
-    tokens = _target_tokens()
-    logger.info("Target sheets: %d", len(tokens))
+    client_set = set(CLIENT_SHEET_TOKENS)
+
+    def hannah_or_lucy(tok):
+        owner = (SHEET_OWNERS.get(tok, "") or "").lower()
+        return "hannah" in owner or "lucy" in owner
+
+    main_set = set(t for t in SHEET_TOKENS
+                   if hannah_or_lucy(t) and t not in client_set)
+    tokens = list(dict.fromkeys(list(main_set) + list(CLIENT_SHEET_TOKENS)))
+    logger.info("Target sheets: %d (%d main, %d bulk)",
+                len(tokens), len(main_set), len(client_set))
+
     total = 0
     for token in tokens:
         owner = SHEET_OWNERS.get(token, token[:10])
+        is_main = token in main_set
         try:
             tabs = client.get_sheet_metadata(token) or []
         except Exception as e:
@@ -164,7 +197,7 @@ def main():
         for tab in tabs:
             try:
                 total += process_tab(client, token, owner,
-                                     tab["sheet_id"], tab["title"], hrow)
+                                     tab["sheet_id"], tab["title"], hrow, is_main)
             except Exception as e:
                 logger.error("  %s / %s failed: %s", owner, tab.get("title"), e)
     logger.info("=== %s complete: %d cell change(s) %s ===",
