@@ -600,7 +600,7 @@ class LarkClient:
             order = ""
 
         url = LarkClient._tracking_url(tracking, carrier)
-        tracking_display = (f"[**{tracking}**]({url})" if url else f"**{tracking}**") + (f" ({r.get('extra_tracking', 0) + 1} boxes)" if r.get("extra_tracking") else "")
+        tracking_display = (f"[**{tracking}**]({url})" if url else f"**{tracking}**") + (f" ({r.get('extra_tracking', 0) + 1} boxes)" if r.get("extra_tracking") and not (packages and len(packages) > 1) else "")
 
         if packages and len(packages) > 1:
             total = len(packages)
@@ -689,9 +689,9 @@ class LarkClient:
         seen, unique = set(), []
         for r in active:
             tn = r.get("tracking_num", "").strip()
-            if True:
+            if tn and tn not in seen:
                 seen.add(tn)
-                r = {**r, "group_count": 1}
+                r = {**r, "group_count": tracking_counts.get(tn, 1)}
                 unique.append(r)
 
         buckets = {tab: [] for tab in PERMANENT_TABS}
