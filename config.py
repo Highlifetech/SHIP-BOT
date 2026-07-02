@@ -80,6 +80,8 @@ UPS_CLIENT_SECRET = os.environ.get("UPS_CLIENT_SECRET", "")
 
 # DHL -- https://developer.dhl.com (free tier)
 DHL_API_KEY = os.environ.get("DHL_API_KEY", "")
+# 17Track universal aggregator -- DPD, UniUni, 1ST, 4PX (no native API)
+SEVENTEENTRACK_API_KEY = os.environ.get("SEVENTEENTRACK_API_KEY", "")
 
 # =============================================================================
 # BOT SETTINGS
@@ -116,6 +118,15 @@ CARRIER_ALIASES = {
     "shunfeng": "sfexpress",
     "shun feng": "sfexpress",
     "sf international": "sfexpress",
+    # DPD / UniUni / 1ST / 4PX -- resolved via 17Track aggregator
+    "dpd": "dpd",
+    "uniuni": "uniuni",
+    "uni uni": "uniuni",
+    "1st": "first",
+    "first": "first",
+    "1st mile": "first",
+    "4px": "fourpx",
+    "fourpx": "fourpx",
 }
 
 # Status values the bot writes to the sheet (column M)
