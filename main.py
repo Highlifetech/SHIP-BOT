@@ -448,7 +448,12 @@ def run_tracker(dry_run=False, chat_id=None, message_id=None):
     # Auto-discover spreadsheets in the configured Drive folders so new
     # client sheets are scanned without touching any secrets.
     for folder_token in FOLDER_TOKENS:
-        for f in lark.list_folder_sheets(folder_token):
+        try:
+            discovered = lark.list_folder_sheets(folder_token)
+        except Exception as e:
+            logger.error("Folder discovery failed for %s: %s", folder_token, e)
+            discovered = []
+        for f in discovered:
             tok = (f.get("token") or "").strip()
             if not tok or tok in SHEET_TOKENS:
                 continue
