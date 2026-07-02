@@ -768,4 +768,8 @@ class CarrierTracker:
             return normalize_result("unknown",
                                     error="Unsupported carrier: %s" % carrier)
         logger.info("Tracking %s via %s", tracking_number, carrier.upper())
-        return client.track(tracking_number)
+        try:
+            return client.track(tracking_number)
+        except Exception as e:
+            logger.error("Carrier %s failed for %s: %s", carrier, tracking_number, e)
+            return normalize_result("unknown", error=str(e))
