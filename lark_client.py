@@ -207,12 +207,12 @@ class LarkClient:
                 row.append("")
 
             shipment_id_raw = cell(row, i_shipment)
-            tracking_raw = cell(row, i_tracking)
+            tracking_tokens = cell(row, i_tracking).split(); tracking_raw = tracking_tokens[0] if tracking_tokens else ""
             carrier_raw = cell(row, i_carrier)
             num_boxes_raw = cell(row, i_num_boxes)
 
             shipment_id = shipment_id_raw or last_shipment_id
-            tracking = tracking_raw or last_tracking
+            tracking = tracking_raw or ("" if (shipment_id_raw or cell(row, i_order)) else last_tracking)
             carrier = carrier_raw or last_carrier
             num_boxes = num_boxes_raw or last_num_boxes
 
@@ -252,7 +252,7 @@ class LarkClient:
                 "recipient": cell(row, i_recipient),
                 "customer": cell(row, i_customer),
                 "order_num": cell(row, i_order),
-                "tracking_num": tracking,
+                "tracking_num": tracking, "extra_tracking": max(0, len(tracking_tokens) - 1),
                 "carrier": carrier,
                 "num_boxes": num_boxes,
                 "current_status": status_raw,
@@ -553,7 +553,7 @@ class LarkClient:
                 for p in packages
             )
             return delivered_any and not still_moving
-        return status == "DELIVERED"
+        return status == "DELIVERED" or (r.get("raw_status", "") or "").strip().upper().startswith("DELIVERED")
 
     @staticmethod
     def _tracking_url(tracking, carrier):
@@ -596,11 +596,11 @@ class LarkClient:
         # For shipments where one tracking number covers many sheet rows, show a
         # single grouped line representing all the items (no per-order/customer).
         if grouped:
-            name = f"{group_count} items"
+            name = f"{group_count} orders"
             order = ""
 
         url = LarkClient._tracking_url(tracking, carrier)
-        tracking_display = f"[**{tracking}**]({url})" if url else f"**{tracking}**"
+        tracking_display = (f"[**{tracking}**]({url})" if url else f"**{tracking}**") + (f" ({r.get('extra_tracking', 0) + 1} boxes)" if r.get("extra_tracking") else "")
 
         if packages and len(packages) > 1:
             total = len(packages)
@@ -645,7 +645,7 @@ class LarkClient:
             status_desc = "label created - not yet scanned"
         else:
             if raw_status and location:
-                status_desc = f"{raw_status.lower()} in {location}"
+                status_desc = raw_status.lower() if location.split("-")[0].strip().lower() in raw_status.lower() else f"{raw_status.lower()} in {location}"
             elif location:
                 status_desc = f"in transit in {location}"
             elif raw_status:
@@ -689,9 +689,9 @@ class LarkClient:
         seen, unique = set(), []
         for r in active:
             tn = r.get("tracking_num", "").strip()
-            if tn and tn not in seen:
+            if True:
                 seen.add(tn)
-                r = {**r, "group_count": tracking_counts.get(tn, 1)}
+                r = {**r, "group_count": 1}
                 unique.append(r)
 
         buckets = {tab: [] for tab in PERMANENT_TABS}
@@ -714,7 +714,7 @@ class LarkClient:
                 by_carrier.setdefault(c, []).append(r)
             for carrier in sorted(by_carrier):
                 lines.append(NL + "".join(c + "\u0332" for c in carrier))
-                for r in by_carrier[carrier]:
+                for r in sorted(by_carrier[carrier], key=lambda rr: 0 if ("EXCEPTION" in (rr.get("new_status", "") or "").upper() or "DELAY" in (rr.get("new_status", "") or "").upper()) else (1 if "TRANSIT" in (rr.get("new_status", "") or "").upper() else 2)):
                     lines.append(LarkClient._shipment_line(r))
 
         for tab_name in PERMANENT_TABS:
