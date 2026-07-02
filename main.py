@@ -33,7 +33,7 @@ import logging
 import time
 from datetime import datetime, timezone, timedelta
 
-from config import SHEET_TOKENS, CARRIER_ALIASES, SHEET_OWNERS, STATUS_MAP, COLUMNS, FOLDER_TOKENS, register_client_sheet
+from config import SHEET_TOKENS, CARRIER_ALIASES, SHEET_OWNERS, STATUS_MAP, COLUMNS, FOLDER_TOKENS, register_client_sheet, columns_for
 from lark_client import LarkClient
 from stuck_detector import run_stuck_detection
 from carriers import CarrierTracker, _fmt_date
@@ -216,7 +216,8 @@ def is_exception_status(status_str, raw_status=""):
         return True
     return False
 
-
+def auto_shipment_id(tracking_num, carrier=""):
+    prefixes = {"fedex": "FDX", "ups": "UPS", "usps": "USP", "dhl": "DHL", "royalmail": "RM", "sfexpress": "SF"}; tail = "".join(ch for ch in (tracking_num or "") if ch.isalnum())[-4:].upper(); return prefixes.get(normalize_carrier(carrier or ""), "SHP") + "-" + tail
 def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
     all_results = []
     try:
@@ -253,6 +254,12 @@ def process_sheet(lark, tracker, spreadsheet_token, dry_run=False):
 
         if not dry_run:
             validate_and_fix_rows(lark, spreadsheet_token, sheet_id, rows)
+        # Auto-fill Shipment IDs (column A) for tracked rows missing one.
+        sid_col = "" if dry_run else columns_for(spreadsheet_token).get("shipment_id", "")
+        sid_updates = [{"row": row["row_num"], "col": sid_col, "value": auto_shipment_id(row["tracking_num"], row.get("carrier", ""))} for row in rows if sid_col and row.get("tracking_num") and not row.get("shipment_id")]
+        if sid_updates:
+            try: lark.write_cells(spreadsheet_token, sheet_id, sid_updates); logger.info("  Filled %d shipment IDs", len(sid_updates))
+            except Exception as e: logger.error("  Failed to write shipment IDs: %s", e)
 
         for row in rows:
             tracking_num = row["tracking_num"]
