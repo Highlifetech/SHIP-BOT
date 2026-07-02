@@ -596,11 +596,11 @@ class LarkClient:
         # For shipments where one tracking number covers many sheet rows, show a
         # single grouped line representing all the items (no per-order/customer).
         if grouped:
-            name = f"{group_count} orders"
+            name = ""
             order = ""
 
         url = LarkClient._tracking_url(tracking, carrier)
-        tracking_display = (f"[**{tracking}**]({url})" if url else f"**{tracking}**") + (f" ({r.get('extra_tracking', 0) + 1} boxes)" if r.get("extra_tracking") and not (packages and len(packages) > 1) else "")
+        tracking_display = (f"[**{tracking}**]({url})" if url else f"**{tracking}**") + (f" ({group_count} orders)" if grouped else "") + (f" ({r.get('extra_tracking', 0) + 1} boxes)" if r.get("extra_tracking") and not (packages and len(packages) > 1) else "") + (f" ({str(r.get('num_boxes') or '').strip()} boxes)" if grouped and str(r.get('num_boxes') or '').strip() and not packages and not r.get("extra_tracking") else "")
 
         if packages and len(packages) > 1:
             total = len(packages)
@@ -628,7 +628,7 @@ class LarkClient:
             if not parts:
                 parts.append("in transit")
             box_summary = ", ".join(parts)
-            return f"- {tracking_display} ({total} boxes) -- {name} -- {box_summary}"
+            return f"- {tracking_display} ({total} boxes) -- {box_summary}" if grouped else f"- {tracking_display} ({total} boxes) -- {name} -- {box_summary}"
 
         if status == "DELIVERED":
             if delivery:
@@ -665,7 +665,7 @@ class LarkClient:
                 date_desc = ""
 
         if grouped:
-            return f"- {tracking_display} -- {name} -- {status_desc}{date_desc}"
+            return f"- {tracking_display} -- {status_desc}{date_desc}"
         return f"- {tracking_display} -- {order} -- {name} -- {status_desc}{date_desc}"
 
     def send_daily_summary(self, all_results, chat_id=None, message_id=None):
