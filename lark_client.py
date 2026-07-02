@@ -664,9 +664,14 @@ class LarkClient:
             else:
                 date_desc = ""
 
+        city = ""
+        if location:
+            city = location.replace(" - ", ",").split(",")[0].strip()
+        loc_desc = f" in {city}" if (status == "DELIVERED" and city) else ""
+
         if grouped:
-            return f"- {tracking_display} -- {status_desc}{date_desc}"
-        return f"- {tracking_display} -- {order} -- {name} -- {status_desc}{date_desc}"
+            return f"- {tracking_display} -- {status_desc}{date_desc}{loc_desc}"
+        return f"- {tracking_display} -- {order} -- {name} -- {status_desc}{date_desc}{loc_desc}"
 
     def send_daily_summary(self, all_results, chat_id=None, message_id=None):
         """Send the shipment summary card to the Lark group chat."""
