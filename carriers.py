@@ -24,6 +24,7 @@ from config import (
     UPS_CLIENT_ID,
     UPS_CLIENT_SECRET,
     DHL_API_KEY,
+    SEVENTEENTRACK_API_KEY,
     STATUS_MAP,
 )
 
@@ -685,6 +686,55 @@ class RoyalMailTracker:
             return normalize_result("unknown", error=str(e))
 
 # =============================================================================
+# 17Track (universal aggregator: DPD, UniUni, 1ST, 4PX, and others)
+# =============================================================================
+class SeventeenTrackTracker:
+    REGISTER_URL = "https://api.17track.net/track/v2.2/register"
+    INFO_URL = "https://api.17track.net/track/v2.2/gettrackinfo"
+    STATUS_MAP_17 = {
+        "Delivered": "delivered", "OutForDelivery": "out_for_delivery",
+        "InTransit": "in_transit", "AvailableForPickup": "in_transit",
+        "InfoReceived": "label_created", "DeliveryFailure": "exception",
+        "Exception": "exception", "NotFound": "not_found", "Expired": "unknown",
+    }
+
+    def _headers(self):
+        return {"17token": SEVENTEENTRACK_API_KEY, "Content-Type": "application/json"}
+
+    def track(self, tracking_number):
+        if not SEVENTEENTRACK_API_KEY:
+            return normalize_result("unknown", error="17track API key not configured")
+        try:
+            body = [{"number": tracking_number}]
+            try:
+                requests.post(self.REGISTER_URL, headers=self._headers(), json=body, timeout=20)
+            except Exception as e:
+                logger.warning("17track register failed for %s: %s", tracking_number, e)
+            resp = requests.post(self.INFO_URL, headers=self._headers(), json=body, timeout=20)
+            resp.raise_for_status()
+            data = resp.json()
+            accepted = data.get("data", {}).get("accepted", [])
+            if not accepted:
+                return normalize_result("unknown", raw_status="17track: no data yet")
+            info = accepted[0].get("track_info", {}) or {}
+            latest_status = info.get("latest_status", {}) or {}
+            raw_code = latest_status.get("status", "")
+            status = self.STATUS_MAP_17.get(raw_code, "in_transit")
+            latest_event = info.get("latest_event", {}) or {}
+            raw_status = latest_event.get("description", "") or raw_code
+            location = latest_event.get("location", "") or ""
+            metrics = info.get("time_metrics", {}) or {}
+            edd = metrics.get("estimated_delivery_date", {}) or {}
+            delivery_date = (edd.get("to") or edd.get("from") or "")[:10]
+            if status == "delivered" and latest_event.get("time_iso"):
+                delivery_date = latest_event["time_iso"][:10]
+            return normalize_result(status, delivery_date, location, raw_status)
+        except Exception as e:
+            logger.error("17track tracking error for %s: %s", tracking_number, e)
+            return normalize_result("unknown", error=str(e))
+
+
+# =============================================================================
 # Unified Tracker
 # =============================================================================
 
@@ -696,6 +746,7 @@ class CarrierTracker:
         self.dhl = DHLTracker()
         self.royalmail = RoyalMailTracker()
         self.sfexpress = SFExpressTracker()
+        self.seventeentrack = SeventeenTrackTracker()
         self._clients = {
             "fedex": self.fedex,
             "ups": self.ups,
@@ -703,6 +754,10 @@ class CarrierTracker:
             "dhl": self.dhl,
             "royalmail": self.royalmail,
             "sfexpress": self.sfexpress,
+            "dpd": self.seventeentrack,
+            "uniuni": self.seventeentrack,
+            "first": self.seventeentrack,
+            "fourpx": self.seventeentrack,
         }
 
     def track(self, tracking_number, carrier):
