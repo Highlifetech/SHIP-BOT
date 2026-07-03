@@ -2,9 +2,12 @@ name: Shipment Tracking Bot
 
 on:
   schedule:
-    # 8:00 AM EST (13:00 UTC)
+    # 8:00 AM ET -- fire at both EDT (12:00 UTC) and EST (13:00 UTC).
+    # A guard in main() runs only the firing inside the true 8 AM ET window.
+    - cron: '0 12 * * *'
     - cron: '0 13 * * *'
-    # 8:00 PM EST (01:00 UTC)
+    # 8:00 PM ET -- EDT (00:00 UTC) and EST (01:00 UTC).
+    - cron: '0 0 * * *'
     - cron: '0 1 * * *'
   workflow_dispatch:
     inputs:
