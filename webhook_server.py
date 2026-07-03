@@ -83,15 +83,6 @@ def start_scheduler():
         replace_existing=True,
     )
 
-    # Full summary at exactly 1:00 PM Eastern
-    scheduler.add_job(
-        scheduled_full_summary,
-        CronTrigger(hour=13, minute=0, timezone=EASTERN),
-        id="summary_1pm",
-        name="1pm Full Summary",
-        replace_existing=True,
-    )
-
     # Full summary at exactly 8:00 PM Eastern
     scheduler.add_job(
         scheduled_full_summary,
