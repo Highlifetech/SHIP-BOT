@@ -510,6 +510,16 @@ def main():
         now_et = _eastern_now()
         logger.info("Running at ET time: %s", now_et.strftime("%Y-%m-%d %H:%M %Z"))
 
+        # GitHub cron is UTC-only, so crons fire at both the EDT and EST
+        # offsets for 8 AM / 8 PM ET. This guard runs only within the true
+        # Eastern window and drops the off-by-one-hour firing caused by
+        # daylight saving. Manual (workflow_dispatch) and --force runs always
+        # proceed.
+        event = os.environ.get("GITHUB_EVENT_NAME", "")
+        if event == "schedule" and not force and not is_scheduled_time():
+            logger.info("Outside the 8 AM / 8 PM ET window -- skipping this run.")
+            return
+
         run_tracker(dry_run=False)
         logger.info("Done!")
 
