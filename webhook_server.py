@@ -1,19 +1,16 @@
 """
-Lark Shipment Tracking Bot - Webhook Server
+Lark Shipment Tracking Bot - Webhook Server (now with chat)
 
-Runs as a persistent web server (via gunicorn on Railway).
-Handles two responsibilities:
-  1. Scheduled runs: 8am, 1pm, and 8pm EST full summary
-  2. @mention trigger: when the bot is @mentioned, run the full tracker and reply in-thread
-
-Schedule (all times US Eastern):
-  - 8:00 AM  -> full shipment summary to HLT INBOUND DELIVERIES
-  - 1:00 PM  -> full shipment summary to HLT INBOUND DELIVERIES
-  - 8:00 PM  -> full shipment summary to HLT INBOUND DELIVERIES
+Two jobs, both intact:
+  1. TRACKER (unchanged): scheduled 8am/8pm ET scans post the full summary,
+     and any run also refreshes the chat snapshot.
+  2. CHAT (new): when @mentioned with a question, the bot answers
+     conversationally from the latest scan snapshot (fast — no carrier scan).
+     Saying "refresh" / "full summary" triggers a live scan instead.
 
 Deployed on Railway:
-  - Procfile: web: gunicorn webhook_server:app --bind 0.0.0.0:$PORT
-  - Environment variables match GitHub Secrets
+  - Procfile: web: gunicorn webhook_server:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+  - Environment variables match GitHub Secrets (now also ANTHROPIC_API_KEY, BOT_MODEL)
 """
 
 import os
@@ -28,6 +25,7 @@ from apscheduler.triggers.cron import CronTrigger
 import pytz
 from main import run_tracker
 from lark_client import LarkClient
+import chat  # NEW: the chat brain
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,59 +41,42 @@ LARK_CHAT_ID = os.environ.get("LARK_CHAT_ID", "")
 
 lark = LarkClient()
 
-# Bot open_id - fetched at startup
 BOT_OPEN_ID = None
-
-# Deduplication for webhook messages
 processed_message_ids = {}
 DEDUP_TTL = 300
 _dedup_lock = threading.Lock()
-
-# Timezone for scheduling
 EASTERN = pytz.timezone("America/New_York")
 
 
-
 # -------------------------------------------------------------------------
-# Scheduled jobs
+# Scheduled jobs  (tracker — unchanged behavior, now also refreshes snapshot)
 # -------------------------------------------------------------------------
 
 def scheduled_full_summary():
     """Send full shipment summary - runs at 8am and 8pm Eastern."""
     logger.info("=== SCHEDULED FULL SUMMARY ===")
     try:
-        run_tracker(dry_run=False, chat_id=LARK_CHAT_ID)
+        results = run_tracker(dry_run=False, chat_id=LARK_CHAT_ID)
+        chat.update_snapshot(results)          # NEW: keep chat answers current
         logger.info("Scheduled full summary complete")
     except Exception as e:
         logger.error("Scheduled full summary failed: %s", e)
 
 
 def start_scheduler():
-    """Start the APScheduler with precise Eastern time schedules."""
     scheduler = BackgroundScheduler(timezone=EASTERN)
-
-    # Full summary at exactly 8:00 AM Eastern
     scheduler.add_job(
         scheduled_full_summary,
         CronTrigger(hour=8, minute=0, timezone=EASTERN),
-        id="summary_8am",
-        name="8am Full Summary",
-        replace_existing=True,
+        id="summary_8am", name="8am Full Summary", replace_existing=True,
     )
-
-    # Full summary at exactly 8:00 PM Eastern
     scheduler.add_job(
         scheduled_full_summary,
         CronTrigger(hour=20, minute=0, timezone=EASTERN),
-        id="summary_8pm",
-        name="8pm Full Summary",
-        replace_existing=True,
+        id="summary_8pm", name="8pm Full Summary", replace_existing=True,
     )
-
-
-
     scheduler.start()
-    logger.info("Scheduler started: 8am, 1pm, 8pm summary (Eastern time)")
+    logger.info("Scheduler started: 8am, 8pm summary (Eastern time)")
     return scheduler
 
 
@@ -151,17 +132,39 @@ def _bot_is_mentioned(msg):
     return False
 
 
-def _run_and_reply(chat_id, message_id):
+def _handle_message(chat_id, message_id, question):
+    """Route an @mention: live scan for 'refresh', else a chat answer."""
     try:
-        logger.info("@mention trigger: chat=%s message=%s", chat_id, message_id)
-        run_tracker(dry_run=False, chat_id=chat_id, message_id=message_id)
+        q = (question or "").strip()
+
+        # Explicit live scan (also refreshes the chat snapshot).
+        if not q or chat.is_full_summary_request(q):
+            logger.info("Full-scan request in chat=%s", chat_id)
+            results = run_tracker(dry_run=False, chat_id=chat_id, message_id=message_id)
+            chat.update_snapshot(results)
+            return
+
+        # Conversational question. Warm the snapshot once if we have none yet
+        # (e.g. right after a redeploy) so the first answer is grounded.
+        if not chat.has_snapshot():
+            lark.send_group_message(
+                "One sec — pulling the latest shipment data…",
+                chat_id=chat_id, message_id=message_id,
+            )
+            try:
+                results = run_tracker(dry_run=True)   # read-only: no writes, no summary
+                chat.update_snapshot(results)
+            except Exception as e:
+                logger.error("Snapshot warm-up scan failed: %s", e)
+
+        chat.answer_and_reply(q, chat_id, message_id, lark)
+
     except Exception as e:
-        logger.error("Error during @mention-triggered run: %s", e)
+        logger.error("Error handling message: %s", e)
         try:
             lark.send_group_message(
-                "Error running shipment tracker: " + str(e)[:200],
-                chat_id=chat_id,
-                message_id=message_id,
+                "Sorry — I hit an error on that one.",
+                chat_id=chat_id, message_id=message_id,
             )
         except Exception:
             pass
@@ -176,7 +179,6 @@ def webhook():
     body = request.get_json(silent=True) or {}
 
     if body.get("type") == "url_verification":
-        logger.info("URL verification challenge answered")
         return jsonify({"challenge": body.get("challenge", "")})
 
     header = body.get("header", {})
@@ -189,50 +191,35 @@ def webhook():
 
     if msg.get("message_type") != "text":
         return jsonify({"code": 0})
-
     if _is_bot_message(event):
-        logger.info("Ignoring bot's own message")
         return jsonify({"code": 0})
 
     message_id = msg.get("message_id", "")
     if not message_id:
         return jsonify({"code": 0})
-
     if _is_already_processed(message_id):
-        logger.info("Duplicate message ignored: %s", message_id)
         return jsonify({"code": 0})
 
-    if not _bot_is_mentioned(msg):
-        logger.info("Bot not @mentioned - ignoring message")
+    # In group chats, only respond when @mentioned. In 1:1 (p2p), always respond.
+    chat_type = msg.get("chat_type", "")
+    if chat_type != "p2p" and not _bot_is_mentioned(msg):
         return jsonify({"code": 0})
 
     chat_id = msg.get("chat_id", "")
     if not chat_id:
         return jsonify({"code": 0})
 
-    logger.info("@mention confirmed in chat=%s - launching tracker", chat_id)
-    threading.Thread(target=_run_and_reply, args=(chat_id, message_id), daemon=True).start()
+    # Ack Lark instantly (return 200 now); do the work in a background thread.
+    question = chat.extract_question(msg)
+    threading.Thread(
+        target=_handle_message, args=(chat_id, message_id, question), daemon=True
+    ).start()
     return jsonify({"code": 0})
 
 
 @app.route("/health", methods=["GET"])
 def health():
-    return jsonify({"status": "ok", "bot_open_id": BOT_OPEN_ID})
-
-
-@app.route("/list-chats", methods=["GET"])
-def list_chats():
-    try:
-        url = lark.base_url + "/open-apis/im/v1/chats"
-        resp = requests.get(url, headers=lark._headers(), params={"page_size": 100}, timeout=30)
-        data = resp.json()
-        if data.get("code") != 0:
-            return jsonify({"error": data})
-        chats = data.get("data", {}).get("items", [])
-        result = [{"chat_id": c.get("chat_id"), "name": c.get("name", "")} for c in chats]
-        return jsonify({"chats": result, "count": len(result)})
-    except Exception as e:
-        return jsonify({"error": str(e)})
+    return jsonify({"status": "ok", "bot_open_id": BOT_OPEN_ID, "has_snapshot": chat.has_snapshot()})
 
 
 # -------------------------------------------------------------------------
