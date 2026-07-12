@@ -157,6 +157,26 @@ def _is_customs(result):
     return any(kw in text for kw in CUSTOMS_KEYWORDS)
 
 
+NO_MOVE_DAYS = float(os.environ.get("NO_MOVE_DAYS", "2"))
+
+PRE_SCAN_KEYWORDS = [
+    "information sent", "shipment information", "label created",
+    "pre-shipment", "pre shipment", "order received", "info received",
+    "shipping label", "not yet been", "awaiting item",
+]
+
+
+def _is_pre_scan(result):
+    """True for label-created / info-received statuses before the first scan.
+
+    e.g. FedEx "Shipment information sent to FedEx" -- a label exists but the
+    parcel has not physically entered the network, so it cannot be stuck.
+    """
+    raw = ((result.get("raw_status") or "") + " " +
+           (result.get("new_status") or "")).lower()
+    return any(kw in raw for kw in PRE_SCAN_KEYWORDS)
+
+
 def _display_name(result):
     """Mirror LarkClient._shipment_line naming so alerts read consistently."""
     recipient = (result.get("recipient") or "").strip()
@@ -200,29 +220,27 @@ def _evaluate(result, entry, now):
     days_unchanged = (now - _parse(entry["last_change"])).total_seconds() / 86400.0
     location = (result.get("location") or "").strip()
 
+    # A customs / clearance hold is always worth flagging once it repeats.
     customs = _is_customs(result) and observations >= CUSTOMS_MIN_OBS
-    stuck3 = days_unchanged >= STUCK_DAYS and status in IN_TRANSIT_LIKE
-    stuck7 = days_unchanged >= STUCK_ESCALATE_DAYS and status in IN_TRANSIT_LIKE
-    nomove = (bool(location) and observations >= NO_MOVE_MIN_OBS
-              and status in IN_TRANSIT_LIKE)
+
+    # No-movement is only meaningful AFTER a real physical scan: the parcel
+    # must have a concrete location, be in transit, NOT be a pre-transit label
+    # ("Shipment information sent to FedEx" / label created), and have sat in
+    # the same spot for MORE than NO_MOVE_DAYS days.
+    scanned = (bool(location) and status in IN_TRANSIT_LIKE
+               and not _is_pre_scan(result))
+    same_spot = (scanned and observations >= NO_MOVE_MIN_OBS
+                 and days_unchanged > NO_MOVE_DAYS)
+    escalated = same_spot and days_unchanged >= STUCK_ESCALATE_DAYS
 
     stage = 0
-    if nomove:
-        stage = 1
-    if stuck3 or customs:
-        stage = 2
-    if stuck7:
-        stage = 3
-
+    reason = None
     if customs:
-        reason = "CUSTOMS_HOLD"
-    elif stuck3 or stuck7:
-        reason = "STUCK_NO_SCAN"
-    elif nomove:
-        reason = "NO_LOCATION_CHANGE"
-    else:
-        reason = None
-        stage = 0
+        stage, reason = 2, "CUSTOMS_HOLD"
+    elif escalated:
+        stage, reason = 3, "NO_LOCATION_CHANGE"
+    elif same_spot:
+        stage, reason = 2, "NO_LOCATION_CHANGE"
 
     return stage, reason, days_unchanged
 
