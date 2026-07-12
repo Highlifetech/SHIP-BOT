@@ -179,6 +179,64 @@ def _is_pre_scan(result):
     return any(kw in raw for kw in PRE_SCAN_KEYWORDS)
 
 
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+
+
+def _ai_customs_summary(customs_alerts):
+    """Ask Claude for a 2-3 sentence plain-English update on customs holds.
+
+    Returns the text, or "" if no key is configured or the call fails. Never
+    raises -- the alert still goes out without the summary.
+    """
+    if not ANTHROPIC_API_KEY or not customs_alerts:
+        return ""
+    rows = []
+    for a in customs_alerts:
+        rows.append("- %s via %s: '%s' at %s (%.1f days, tracking %s)" % (
+            a.get("name") or "Unknown",
+            a.get("carrier") or "?",
+            (a.get("raw_status") or a.get("new_status") or "").strip(),
+            (a.get("location") or "unknown location").strip(),
+            float(a.get("days_unchanged", 0) or 0),
+            a.get("tracking_num") or "N/A",
+        ))
+    prompt = (
+        "You are the ops assistant for a merch company tracking inbound "
+        "shipments. The parcels below appear held in customs/clearance. Write a "
+        "2-3 sentence plain-English update for the founders: what is held, "
+        "roughly where, and how long, plus a brief suggested next step if one is "
+        "obvious. Factual and concise. No greeting, no sign-off.\n\n"
+        + "\n".join(rows)
+    )
+    try:
+        resp = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": ANTHROPIC_MODEL,
+                "max_tokens": 250,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        text = "".join(
+            p.get("text", "") for p in data.get("content", [])
+            if p.get("type") == "text"
+        ).strip()
+        return text
+    except Exception as e:
+        logger.warning("AI customs summary failed: %s", e)
+        return ""
+
+
+
 def _display_name(result):
     """Mirror LarkClient._shipment_line naming so alerts read consistently."""
     recipient = (result.get("recipient") or "").strip()
@@ -337,6 +395,13 @@ def build_message(alerts):
     header = "**Shipments need attention (%d)**" % n
     lines = [header,
              NL + "These shipments have stopped progressing since the last check:"]
+
+    # Plain-English customs update from Claude (skipped if key/call absent).
+    _customs = [a for a in alerts if a.get("reason") == "CUSTOMS_HOLD"]
+    _summary = _ai_customs_summary(_customs)
+    if _summary:
+        lines.append(NL + "**Customs update**")
+        lines.append(_summary)
 
     # Group by reason for readability.
     order = ["CUSTOMS_HOLD", "STUCK_NO_SCAN", "NO_LOCATION_CHANGE"]
