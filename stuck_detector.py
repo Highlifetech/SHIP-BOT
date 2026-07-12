@@ -134,8 +134,10 @@ def _signature(result):
     """
     status = (result.get("new_status") or "").strip()
     location = (result.get("location") or "").strip().lower()
-    raw = (result.get("raw_status") or "").strip().lower()
-    return "%s|%s|%s" % (status, location, raw)
+    # Track the SPOT (status + physical location) only. The raw scan text is
+    # deliberately excluded: it changes on every re-scan at the same place, which
+    # would keep resetting the "no change" clock and hide a real multi-day stall.
+    return "%s|%s" % (status, location)
 
 
 def _has_real_scan_data(result):
