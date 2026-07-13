@@ -4,17 +4,6 @@ Ship-Bot chat brain.
 Turns Ship-Bot into a conversational assistant WITHOUT touching the tracker.
 The scheduled scans still run and still post their summaries; this module just
 lets people @mention the bot and ask questions about shipments in plain English.
-
-How it stays fast:
-  - It answers from the LATEST scan SNAPSHOT (updated after every scheduled run),
-    so a normal question does NOT trigger a slow carrier-API scan.
-  - Only an explicit "refresh / full summary" request re-runs the live tracker
-    (handled in webhook_server.py, not here).
-
-Requires:
-  - env ANTHROPIC_API_KEY
-  - env BOT_MODEL (optional; defaults to a fast, high-quality model)
-  - `anthropic` in requirements.txt
 """
 
 import os
@@ -24,11 +13,11 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Fast + high quality. Set BOT_MODEL=claude-opus-4-8 for maximum quality
-# (a bit slower). Confirm the exact current model id in Anthropic's docs.
-MODEL = os.environ.get("BOT_MODEL", "claude-sonnet-5").strip() or "claude-sonnet-5"
-MAX_HISTORY_TURNS = 8          # remember the last N exchanges per chat
-SNAPSHOT_MAX_AGE = 60 * 60     # treat snapshot older than 1h as stale (for the note)
+# Default to the model Iron-Bot uses successfully on this account. Override with
+# BOT_MODEL=claude-opus-4-8 once you've confirmed it's enabled for your key.
+MODEL = os.environ.get("BOT_MODEL", "claude-sonnet-4-6").strip() or "claude-sonnet-4-6"
+MAX_HISTORY_TURNS = 8
+SNAPSHOT_MAX_AGE = 60 * 60
 
 SYSTEM_PROMPT = (
     "You are Ship Bot, High Life Tech's in-house shipment assistant working inside "
@@ -50,17 +39,12 @@ SYSTEM_PROMPT = (
     "- Never dump the entire list unless explicitly asked for a full summary."
 )
 
-# --- Latest scan snapshot (updated by webhook_server after each run) ----------
 _SNAPSHOT = {"results": [], "ts": 0.0}
-
-# --- Per-chat conversation memory (in-memory; resets on redeploy) ------------
 _history = {}
-
 _client = None
 
 
 def _get_client():
-    """Lazy Anthropic client so a missing key never crashes the tracker."""
     global _client
     if _client is not None:
         return _client
@@ -78,7 +62,6 @@ def _get_client():
 
 
 def update_snapshot(results):
-    """Called after every scheduled/manual scan so chat answers stay current."""
     if results is not None:
         _SNAPSHOT["results"] = results
         _SNAPSHOT["ts"] = time.time()
@@ -97,25 +80,21 @@ FULL_SUMMARY_PATTERNS = re.compile(
 
 
 def is_full_summary_request(text):
-    """True when the user is asking for a fresh live scan, not a question."""
     return bool(FULL_SUMMARY_PATTERNS.search(text or ""))
 
 
 def extract_question(msg):
-    """Pull the user's text out of a Lark message, stripping @mentions."""
     import json
     try:
         content = json.loads(msg.get("content", "{}"))
         raw = (content.get("text") or "").strip()
     except Exception:  # noqa: BLE001
         return ""
-    # Remove @mention tokens (Lark sends them as @_user_1 etc. and as names)
     cleaned = re.sub(r"@\S+", "", raw).strip()
     return cleaned or raw
 
 
 def _fmt_shipment(r):
-    """One compact, model-friendly line per shipment."""
     owner = r.get("tab") or r.get("recipient") or ""
     customer = r.get("customer") or r.get("recipient") or "Unknown"
     order = r.get("order_num") or ""
@@ -126,7 +105,6 @@ def _fmt_shipment(r):
     eta = r.get("delivery_date") or ""
     loc = r.get("location") or ""
     boxes = r.get("num_boxes") or ""
-
     bits = []
     if owner:
         bits.append(f"[{owner}]")
@@ -152,8 +130,7 @@ def _fmt_shipment(r):
 def _shipments_context(results, limit=200):
     if not results:
         return "(No shipments in the latest snapshot yet.)"
-    lines = []
-    seen = set()
+    lines, seen = [], set()
     for r in results:
         tn = (r.get("tracking_num") or "").strip()
         key = (tn, r.get("order_num"), r.get("row_num"))
@@ -170,18 +147,15 @@ def _shipments_context(results, limit=200):
 def _remember(chat_id, role, content):
     hist = _history.setdefault(chat_id, [])
     hist.append({"role": role, "content": content})
-    # keep last N exchanges (2 messages per turn)
     if len(hist) > MAX_HISTORY_TURNS * 2:
         _history[chat_id] = hist[-MAX_HISTORY_TURNS * 2:]
 
 
 def answer(question, chat_id):
-    """Generate a conversational answer from the latest snapshot + history."""
     client = _get_client()
     if client is None:
         return ("Chat isn't configured yet — set ANTHROPIC_API_KEY on the Railway "
                 "service and I'll be able to answer questions.")
-
     ctx = _shipments_context(_SNAPSHOT["results"])
     age = time.time() - (_SNAPSHOT["ts"] or 0)
     freshness = ""
@@ -190,31 +164,27 @@ def answer(question, chat_id):
         freshness = f"(Shipment data last refreshed ~{mins} min ago.)\n"
         if age > SNAPSHOT_MAX_AGE:
             freshness += "This snapshot is over an hour old; say 'refresh' for a live scan.\n"
-
     system = f"{SYSTEM_PROMPT}\n\n--- SHIPMENT DATA ---\n{freshness}{ctx}"
-
     messages = list(_history.get(chat_id, []))
     messages.append({"role": "user", "content": question})
-
     try:
-        resp = client.messages.create(
-            model=MODEL,
-            max_tokens=1000,
-            system=system,
-            messages=messages,
-        )
+        resp = client.messages.create(model=MODEL, max_tokens=1000, system=system, messages=messages)
         text = resp.content[0].text.strip()
     except Exception as e:  # noqa: BLE001
         logger.error("Anthropic call failed: %s", e)
-        return "I hit an error reaching the model just now — try again in a moment."
-
+        # Surface the real error while we're stabilizing (helps diagnose model/key issues).
+        return f"I hit an error reaching the model ({MODEL}): {str(e)[:220]}"
     _remember(chat_id, "user", question)
     _remember(chat_id, "assistant", text)
     return text
 
 
 def answer_and_reply(question, chat_id, message_id, lark):
-    """Answer the question and post the reply in-thread via the Lark client."""
+    """Post an instant 'Working on it…' note, then replace it with the answer."""
+    try:
+        lark.send_group_message("_Working on it…_", chat_id=chat_id, message_id=message_id)
+    except Exception:  # noqa: BLE001
+        pass
     try:
         text = answer(question, chat_id)
     except Exception as e:  # noqa: BLE001
