@@ -137,6 +137,13 @@ def _handle_message(chat_id, message_id, question):
     try:
         q = (question or "").strip()
 
+        # Reveal this chat's ID on request (for alert-routing config).
+        _ql = q.lower()
+        if "chat id" in _ql or "chatid" in _ql:
+            logger.info("CHATID-REQUEST chat=%s", chat_id)
+            lark.send_group_message("This chat's ID is: %s" % chat_id, chat_id=chat_id, message_id=message_id)
+            return
+
         # Explicit live scan (also refreshes the chat snapshot).
         if not q or chat.is_full_summary_request(q):
             logger.info("Full-scan request in chat=%s", chat_id)
