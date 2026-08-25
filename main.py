@@ -468,6 +468,9 @@ def run_tracker(dry_run=False, chat_id=None, message_id=None):
             logger.info("Discovered sheet %s (%s)", f.get("name", ""), tok)
 
     for token in SHEET_TOKENS:
+        if "quote" in (SHEET_OWNERS.get(token) or "").lower():
+            logger.info("Skipping quotes sheet (not shipments): %s", token)
+            continue
         logger.info("Processing spreadsheet: %s", token)
         results = process_sheet(lark, tracker, token, dry_run)
         all_results.extend(results)
