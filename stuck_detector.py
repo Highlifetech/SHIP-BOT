@@ -453,12 +453,12 @@ def send_founders_alert(lark, alerts, chat_id=None):
     Reuses the existing LarkClient red card helpers so no changes to
     lark_client.py are required.
     """
-    target = chat_id or LARK_FOUNDERS_CHAT_ID or LARK_CHAT_ID
+    target = LARK_FOUNDERS_CHAT_ID or LARK_CHAT_ID
     if not target:
         logger.warning("No alert channel configured -- skipping alert for %d "
                        "shipments", len(alerts))
         return False
-    if not (chat_id or LARK_FOUNDERS_CHAT_ID):
+    if not LARK_FOUNDERS_CHAT_ID:
         logger.info("LARK_CHAT_ID_FOUNDERS not set -- routing %d alert(s) to the "
                     "main deliveries channel as a fallback", len(alerts))
     if not alerts:
