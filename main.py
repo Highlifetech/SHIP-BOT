@@ -457,6 +457,10 @@ def run_tracker(dry_run=False, chat_id=None, message_id=None):
             tok = (f.get("token") or "").strip()
             if not tok or tok in SHEET_TOKENS:
                 continue
+            _nm = (f.get("name") or "")
+            if "quote" in _nm.lower():
+                logger.info("Skipping non-shipment (quotes) sheet: %s", _nm)
+                continue
             SHEET_TOKENS.append(tok)
             register_client_sheet(tok)
             if tok not in SHEET_OWNERS:
