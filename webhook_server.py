@@ -147,7 +147,7 @@ def _handle_message(chat_id, message_id, question):
         # Explicit live scan (also refreshes the chat snapshot).
         if not q or chat.is_full_summary_request(q):
             logger.info("Full-scan request in chat=%s", chat_id)
-            results = run_tracker(dry_run=False, chat_id=chat_id, message_id=message_id)
+            results = run_tracker(dry_run=False, chat_id=LARK_CHAT_ID)  # summary always to deliveries, never URGENT
             chat.update_snapshot(results)
             return
 
