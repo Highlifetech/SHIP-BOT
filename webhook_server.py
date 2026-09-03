@@ -218,6 +218,13 @@ def webhook():
 
     header = body.get("header", {})
     event_type = header.get("event_type", "")
+
+    if event_type == "card.action.trigger" or body.get("action"):
+        try:
+            logger.info("CARD-ACTION payload=%s", json.dumps(body)[:1800])
+        except Exception:
+            logger.info("CARD-ACTION keys=%s", list(body.keys()))
+        return jsonify({"toast": {"type": "info", "content": "Received"}})
     if event_type and event_type != "im.message.receive_v1":
         return jsonify({"code": 0})
 
