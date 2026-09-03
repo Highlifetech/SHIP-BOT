@@ -144,6 +144,34 @@ def _handle_message(chat_id, message_id, question):
             lark.send_group_message("This chat's ID is: %s" % chat_id, chat_id=chat_id, message_id=message_id)
             return
 
+        # Post the new card-layout summary (test) on request.
+        if _ql == "card" or _ql == "cardtest" or "card test" in _ql:
+            logger.info("CARD-TEST request in chat=%s", chat_id)
+            _g = "\U0001F7E2"; _b = "\U0001F535"; _w = "\u26AA"; _r = "\U0001F534"; _m = "\u00B7"
+            _card = {
+                "config": {"wide_screen_mode": True},
+                "header": {"template": "blue", "title": {"tag": "plain_text", "content": "\U0001F4E6 HLT Shipment Tracker"}},
+                "elements": [
+                    {"tag": "div", "text": {"tag": "lark_md", "content": _g + " **12** delivered   " + _b + " **41** in transit   " + _w + " **12** not scanned   " + _r + " **3** flagged"}},
+                    {"tag": "action", "actions": [{"tag": "select_static", "placeholder": {"tag": "plain_text", "content": "Filter by supplier"}, "value": {"key": "supplier_filter"}, "options": [
+                        {"text": {"tag": "plain_text", "content": "All suppliers"}, "value": "all"},
+                        {"text": {"tag": "plain_text", "content": "Denim Tears"}, "value": "denim_tears"},
+                        {"text": {"tag": "plain_text", "content": "7Brew Coffee"}, "value": "sevenbrew"},
+                        {"text": {"tag": "plain_text", "content": "Steady Hands"}, "value": "steady_hands"}
+                    ]}]},
+                    {"tag": "hr"},
+                    {"tag": "div", "text": {"tag": "lark_md", "content": "**Denim Tears**"}},
+                    {"tag": "div", "text": {"tag": "lark_md", "content": _g + " **HLT-SO6468** " + _m + " Out for delivery, Carlsbad CA " + _m + " `FedEx` " + _m + " **Today**\n" + _r + " **HLT-SO6583** " + _m + " Customs clearance delay, Sennan JP " + _m + " `FedEx` " + _m + " Aug 25"}},
+                    {"tag": "hr"},
+                    {"tag": "div", "text": {"tag": "lark_md", "content": "**7Brew Coffee**"}},
+                    {"tag": "div", "text": {"tag": "lark_md", "content": _b + " **HLT-SO6566** " + _m + " Import scan, Louisville KY " + _m + " `UPS` " + _m + " Aug 25"}},
+                    {"tag": "hr"},
+                    {"tag": "note", "elements": [{"tag": "plain_text", "content": "Demo layout \u2014 supplier filter wiring next"}]}
+                ]
+            }
+            lark._send_card(None, LARK_CHAT_ID, card_json=json.dumps(_card))
+            return
+
         # Explicit live scan (also refreshes the chat snapshot).
         if not q or chat.is_full_summary_request(q):
             logger.info("Full-scan request in chat=%s", chat_id)
