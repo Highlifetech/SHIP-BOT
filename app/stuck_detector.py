@@ -1,0 +1,552 @@
+"""
+Stuck / No-Movement / Customs-Hold Detection
+
+Adds a second, *exception-focused* alert to ShipBot. The normal daily summary
+tells the team what is arriving; this module watches for shipments that have
+STOPPED progressing and pings the founders channel so someone can chase them.
+
+Three conditions are detected (all configurable in config.py):
+
+  1. STUCK_NO_SCAN     -- a shipment's tracking status/location has not changed
+                          for >= STUCK_DAYS days (default 3). "No new scan."
+  2. NO_LOCATION_CHANGE-- the same location has repeated across >= NO_MOVE_MIN_OBS
+                          consecutive checks (default 2) while still in transit.
+  3. CUSTOMS_HOLD      -- a customs/clearance scan keeps repeating across
+                          >= CUSTOMS_MIN_OBS consecutive checks (default 2).
+
+How it knows something is "stuck"
+---------------------------------
+The carrier APIs do not hand us a reliable "last scan timestamp" across every
+carrier, so instead we compare each shipment's *signature* (status + location +
+raw status text) between runs. We persist a small JSON state file between
+GitHub Actions runs (via actions/cache) and measure how long each signature has
+stayed unchanged. When a signature stops changing, the shipment has stopped
+moving.
+
+Alert hygiene
+-------------
+We only alert ONCE per "stuck episode" and then again only when severity
+escalates (e.g. a no-movement watch becomes a 3-day stall, or a 3-day stall
+becomes a 7-day stall). As soon as a shipment moves again (signature changes)
+the state resets, so if it stalls a second time later it will alert again.
+
+Carriers with no API data (DPD / UniUni / "1ST", or any row that returned no
+location and no raw status) are skipped -- we can't tell a genuine stall from a
+carrier we simply can't see, so we stay quiet rather than cry wolf.
+
+The module is intentionally side-effect-light and dependency-free (only stdlib
++ the existing LarkClient) so it is easy to unit test. The single public entry
+point is run_stuck_detection(all_results, lark).
+"""
+
+import os
+import json
+import logging
+from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Thresholds -- read from config when available, with safe fallbacks so this
+# module also works standalone (e.g. in tests).
+# ---------------------------------------------------------------------------
+try:
+    from config import (
+        LARK_FOUNDERS_CHAT_ID,
+        SCAN_STATE_PATH,
+        STUCK_DAYS,
+        STUCK_ESCALATE_DAYS,
+        NO_MOVE_MIN_OBS,
+        CUSTOMS_MIN_OBS,
+        CUSTOMS_KEYWORDS,
+        STATE_PRUNE_DAYS,
+    )
+except Exception:  # pragma: no cover - fallbacks for standalone/testing
+    LARK_FOUNDERS_CHAT_ID = os.environ.get("LARK_CHAT_ID_FOUNDERS", "")
+    LARK_CHAT_ID = os.environ.get("LARK_CHAT_ID", "")
+    SCAN_STATE_PATH = os.environ.get("SCAN_STATE_PATH", "state/scan_state.json")
+    STUCK_DAYS = float(os.environ.get("STUCK_DAYS", "3"))
+    STUCK_ESCALATE_DAYS = float(os.environ.get("STUCK_ESCALATE_DAYS", "7"))
+    NO_MOVE_MIN_OBS = int(os.environ.get("NO_MOVE_MIN_OBS", "2"))
+    CUSTOMS_MIN_OBS = int(os.environ.get("CUSTOMS_MIN_OBS", "2"))
+    CUSTOMS_KEYWORDS = ["customs", "clearance", "duty", "import control",
+                        "awaiting clearance", "held in customs"]
+    STATE_PRUNE_DAYS = int(os.environ.get("STATE_PRUNE_DAYS", "21"))
+
+# Human-readable status labels the bot assigns (see main._to_dropdown / STATUS_MAP)
+IN_TRANSIT_LIKE = {"In Transit", "Exception/Delay"}
+DELIVERED = "Delivered"
+
+# Reason codes -> (emoji, short label) for the founders message
+REASON_LABELS = {
+    "CUSTOMS_HOLD": ("[CUSTOMS]", "Possible customs hold"),
+    "STUCK_NO_SCAN": ("[STUCK]", "No movement / no new scan"),
+    "NO_LOCATION_CHANGE": ("[STALLED]", "Same location, not progressing"),
+    "LABEL_NEVER_SCANNED": ("[NOT PICKED UP]", "Label created, never scanned"),
+}
+
+# A label whose own ETA is this many days in the past and which the carrier
+# has still never scanned is escalated: the parcel was probably never handed
+# over. Kept low on purpose -- catching it on day one is the whole point.
+OVERDUE_LABEL_DAYS = float(os.environ.get("OVERDUE_LABEL_DAYS", "1"))
+
+
+# ---------------------------------------------------------------------------
+# State persistence
+# ---------------------------------------------------------------------------
+def load_state(path=None):
+    path = path or SCAN_STATE_PATH
+    try:
+        if os.path.exists(path):
+            with open(path, "r") as f:
+                return json.load(f)
+    except Exception as e:
+        logger.warning("Could not load scan state (%s): %s", path, e)
+    return {}
+
+
+def save_state(state, path=None):
+    path = path or SCAN_STATE_PATH
+    try:
+        d = os.path.dirname(path)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(state, f, indent=2, sort_keys=True)
+        logger.info("Scan state saved (%d shipments tracked)", len(state))
+    except Exception as e:
+        logger.warning("Could not save scan state (%s): %s", path, e)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+def _now():
+    return datetime.now(timezone.utc)
+
+
+def _parse(ts):
+    try:
+        return datetime.fromisoformat(ts)
+    except Exception:
+        return _now()
+
+
+def _signature(result):
+    """A stable fingerprint of where a shipment is right now.
+
+    When this string stops changing between runs, the shipment has stopped
+    moving. We deliberately ignore delivery-date estimates (they jitter).
+    """
+    status = (result.get("new_status") or "").strip()
+    location = (result.get("location") or "").strip().lower()
+    # Track the SPOT (status + physical location) only. The raw scan text is
+    # deliberately excluded: it changes on every re-scan at the same place, which
+    # would keep resetting the "no change" clock and hide a real multi-day stall.
+    return "%s|%s" % (status, location)
+
+
+def _has_real_scan_data(result):
+    """True only when the carrier gave us something to reason about.
+
+    Rows from carriers we can't query (DPD/UniUni/1ST) or that errored come
+    back with no location, no raw status and a label-created/unknown status.
+    We skip those so we never alert on a shipment we simply can't see.
+    """
+    status = (result.get("new_status") or "").strip()
+    location = (result.get("location") or "").strip()
+    raw = (result.get("raw_status") or "").strip()
+    return bool(location) or bool(raw) or status in IN_TRANSIT_LIKE
+
+
+def _is_customs(result):
+    text = ((result.get("raw_status") or "") + " " +
+            (result.get("new_status") or "")).lower()
+    return any(kw in text for kw in CUSTOMS_KEYWORDS)
+
+
+NO_MOVE_DAYS = float(os.environ.get("NO_MOVE_DAYS", "2"))
+
+PRE_SCAN_KEYWORDS = [
+    "information sent", "shipment information", "label created",
+    "pre-shipment", "pre shipment", "order received", "info received",
+    "shipping label", "not yet been", "awaiting item",
+]
+
+
+def _is_pre_scan(result):
+    """True for label-created / info-received statuses before the first scan.
+
+    e.g. FedEx "Shipment information sent to FedEx" -- a label exists but the
+    parcel has not physically entered the network, so it cannot be stuck.
+    """
+    raw = ((result.get("raw_status") or "") + " " +
+           (result.get("new_status") or "")).lower()
+    return any(kw in raw for kw in PRE_SCAN_KEYWORDS)
+
+
+def _label_overdue_days(result, now=None):
+    """Days past its own ETA an unscanned label is; 0 when it isn't one."""
+    status = (result.get("new_status") or "").strip()
+    if status == DELIVERED:
+        return 0.0
+    if not (_is_pre_scan(result) or status == "Label Created/Not Scanned"):
+        return 0.0
+    if (result.get("location") or "").strip():
+        return 0.0            # it has moved -- the stall logic owns it
+
+    raw_eta = str(result.get("delivery_date") or "").strip()[:10]
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m-%d-%Y"):
+        try:
+            eta = datetime.strptime(raw_eta, fmt).date()
+        except (ValueError, TypeError):
+            continue
+        today = (now or _now()).date()
+        return max(0.0, float((today - eta).days))
+    return 0.0
+
+
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+
+
+def _ai_customs_summary(customs_alerts):
+    """Ask Claude for a 2-3 sentence plain-English update on customs holds.
+
+    Returns the text, or "" if no key is configured or the call fails. Never
+    raises -- the alert still goes out without the summary.
+    """
+    if not ANTHROPIC_API_KEY or not customs_alerts:
+        return ""
+    rows = []
+    for a in customs_alerts:
+        rows.append("- %s via %s: '%s' at %s (%.1f days, tracking %s)" % (
+            a.get("name") or "Unknown",
+            a.get("carrier") or "?",
+            (a.get("raw_status") or a.get("new_status") or "").strip(),
+            (a.get("location") or "unknown location").strip(),
+            float(a.get("days_unchanged", 0) or 0),
+            a.get("tracking_num") or "N/A",
+        ))
+    prompt = (
+        "You are the ops assistant for a merch company tracking inbound "
+        "shipments. The parcels below appear held in customs/clearance. Write a "
+        "2-3 sentence plain-English update for the founders: what is held, "
+        "roughly where, and how long, plus a brief suggested next step if one is "
+        "obvious. Factual and concise. No greeting, no sign-off.\n\n"
+        + "\n".join(rows)
+    )
+    try:
+        resp = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": ANTHROPIC_MODEL,
+                "max_tokens": 250,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        text = "".join(
+            p.get("text", "") for p in data.get("content", [])
+            if p.get("type") == "text"
+        ).strip()
+        return text
+    except Exception as e:
+        logger.warning("AI customs summary failed: %s", e)
+        return ""
+
+
+
+def _one_line(value):
+    """'Adam Korsunsky' over 'Brick City' -> 'Brick City' (company, not contact)."""
+    parts = [p.strip() for p in str(value or "").splitlines() if p.strip()]
+    return parts[-1] if parts else ""
+
+
+def _display_name(result):
+    """Mirror the card's naming so alerts read consistently."""
+    recipient = _one_line(result.get("recipient"))
+    customer = _one_line(result.get("customer"))
+    if recipient.upper() == "BRENDAN":
+        return "Brendan"
+    if recipient.upper() == "CUSTOMER DIRECT":
+        return customer or "Unknown"
+    name = customer or recipient
+    return name or (result.get("shipment_id") or "").strip() or "Unknown"
+
+
+def _dedupe(all_results):
+    """One record per tracking number (multi-row shipments share a number)."""
+    by_tn = {}
+    for r in all_results:
+        tn = (r.get("tracking_num") or "").strip()
+        if not tn:
+            continue
+        existing = by_tn.get(tn)
+        # Prefer the record that actually carries scan data.
+        if existing is None or (not _has_real_scan_data(existing)
+                                and _has_real_scan_data(r)):
+            by_tn[tn] = r
+    return by_tn
+
+
+# ---------------------------------------------------------------------------
+# Core evaluation
+# ---------------------------------------------------------------------------
+def _evaluate(result, entry, now):
+    """Return (stage, reason, days_unchanged) for one shipment.
+
+    stage 0 = healthy, 1 = stalled (watch), 2 = stuck/customs, 3 = escalated.
+    reason is None when stage == 0.
+    """
+    status = (result.get("new_status") or "").strip()
+    if status == DELIVERED:
+        return 0, None, 0.0
+
+    observations = entry.get("observations", 1)
+    days_unchanged = (now - _parse(entry["last_change"])).total_seconds() / 86400.0
+    location = (result.get("location") or "").strip()
+
+    # A customs / clearance hold is always worth flagging once it repeats.
+    customs = _is_customs(result) and observations >= CUSTOMS_MIN_OBS
+
+    # No-movement is only meaningful AFTER a real physical scan: the parcel
+    # must have a concrete location, be in transit, NOT be a pre-transit label
+    # ("Shipment information sent to FedEx" / label created), and have sat in
+    # the same spot for MORE than NO_MOVE_DAYS days.
+    scanned = (bool(location) and status in IN_TRANSIT_LIKE
+               and not _is_pre_scan(result))
+    same_spot = (scanned and observations >= NO_MOVE_MIN_OBS
+                 and days_unchanged > NO_MOVE_DAYS)
+    escalated = same_spot and days_unchanged >= STUCK_ESCALATE_DAYS
+
+    # A label that is past its own ETA and has never been scanned means the
+    # parcel most likely never left the building. Escalate on day one.
+    overdue_label = _label_overdue_days(result, now)
+
+    stage = 0
+    reason = None
+    if customs:
+        stage, reason = 2, "CUSTOMS_HOLD"
+    elif escalated:
+        stage, reason = 3, "NO_LOCATION_CHANGE"
+    elif same_spot:
+        stage, reason = 2, "NO_LOCATION_CHANGE"
+    elif overdue_label >= OVERDUE_LABEL_DAYS:
+        # Re-alerts once when a day-old miss becomes a week-old one.
+        stage = 3 if overdue_label >= OVERDUE_LABEL_DAYS * 5 else 2
+        reason = "LABEL_NEVER_SCANNED"
+        days_unchanged = max(days_unchanged, overdue_label)
+
+    return stage, reason, days_unchanged
+
+
+def detect(all_results, state, now=None):
+    """Update state from this run's results and return the list of alerts.
+
+    Pure function (no I/O, no network) so it can be unit tested. Mutates and
+    returns 'state'; returns (alerts, state).
+    """
+    now = now or _now()
+    now_iso = now.isoformat()
+    alerts = []
+    seen_tns = set()
+
+    for tn, result in _dedupe(all_results).items():
+        seen_tns.add(tn)
+
+        if not _has_real_scan_data(result) and not _label_overdue_days(result, now):
+            # Can't see this shipment -- drop any stale state, stay quiet.
+            # An overdue never-scanned label is the exception: the absence of
+            # data past its own ETA is exactly the signal.
+            state.pop(tn, None)
+            continue
+
+        sig = _signature(result)
+        entry = state.get(tn)
+
+        if entry is None or entry.get("sig") != sig:
+            # New shipment, or it moved since last run -> reset the clock.
+            entry = {
+                "sig": sig,
+                "first_seen": (entry or {}).get("first_seen", now_iso),
+                "last_change": now_iso,
+                "last_seen": now_iso,
+                "observations": 1,
+                "alerted_sig": "",
+                "alerted_stage": 0,
+            }
+        else:
+            entry["observations"] = entry.get("observations", 1) + 1
+            entry["last_seen"] = now_iso
+
+        # Keep latest context for the message.
+        entry["carrier"] = (result.get("carrier") or "").strip()
+        entry["name"] = _display_name(result)
+        entry["tab"] = (result.get("tab") or "").strip()
+        entry["location"] = (result.get("location") or "").strip()
+        entry["raw_status"] = (result.get("raw_status") or "").strip()
+        entry["num_boxes"] = (result.get("num_boxes") or "").strip()
+
+        stage, reason, days = _evaluate(result, entry, now)
+
+        if reason and (sig != entry.get("alerted_sig")
+                       or stage > entry.get("alerted_stage", 0)):
+            alerts.append({
+                "tracking_num": tn,
+                "carrier": entry["carrier"],
+                "name": entry["name"],
+                "tab": entry["tab"],
+                "location": entry["location"],
+                "raw_status": entry["raw_status"],
+                "num_boxes": entry["num_boxes"],
+                "reason": reason,
+                "stage": stage,
+                "days_unchanged": round(days, 1),
+                "observations": entry["observations"],
+            })
+            entry["alerted_sig"] = sig
+            entry["alerted_stage"] = stage
+
+        state[tn] = entry
+
+    # Prune shipments we haven't seen for a while (delivered/removed).
+    stale = []
+    for tn, entry in state.items():
+        if tn in seen_tns:
+            continue
+        age_days = (now - _parse(entry.get("last_seen", now_iso))).total_seconds() / 86400.0
+        if age_days >= STATE_PRUNE_DAYS:
+            stale.append(tn)
+    for tn in stale:
+        state.pop(tn, None)
+
+    return alerts, state
+
+
+# ---------------------------------------------------------------------------
+# Message formatting + send
+# ---------------------------------------------------------------------------
+def build_message(alerts):
+    NL = chr(10)
+    n = len(alerts)
+    header = "**Shipments need attention (%d)**" % n
+    lines = [header,
+             NL + "These shipments have stopped progressing since the last check:"]
+
+    # Plain-English customs update from Claude (skipped if key/call absent).
+    _customs = [a for a in alerts if a.get("reason") == "CUSTOMS_HOLD"]
+    _summary = _ai_customs_summary(_customs)
+    if _summary:
+        lines.append(NL + "**Customs update**")
+        lines.append(_summary)
+
+    # Group by reason for readability.
+    order = ["CUSTOMS_HOLD", "LABEL_NEVER_SCANNED", "STUCK_NO_SCAN",
+             "NO_LOCATION_CHANGE"]
+    by_reason = {}
+    for a in alerts:
+        by_reason.setdefault(a["reason"], []).append(a)
+
+    for reason in order:
+        items = by_reason.get(reason)
+        if not items:
+            continue
+        tag, label = REASON_LABELS[reason]
+        lines.append(NL + "**%s %s**" % (tag, label))
+        for a in items:
+            carrier = a.get("carrier", "") or "?"
+            tracking = a.get("tracking_num", "N/A")
+            name = a.get("name", "")
+            loc = a.get("location", "")
+            raw = a.get("raw_status", "")
+            days = a.get("days_unchanged", 0)
+            tab = a.get("tab", "")
+            num_boxes = a.get("num_boxes", "")
+
+            box_tag = ""
+            if num_boxes and num_boxes not in ("0", "1"):
+                box_tag = " (%s boxes)" % num_boxes
+
+            bits = []
+            if raw:
+                bits.append(raw)
+            if loc:
+                bits.append("@ " + loc)
+            if reason == "LABEL_NEVER_SCANNED" and days:
+                bits.append("%.0f day(s) past its ETA, never scanned" % days)
+            elif reason in ("STUCK_NO_SCAN", "NO_LOCATION_CHANGE") and days:
+                bits.append("no change for %.0f day(s)" % days)
+            if a.get("stage") == 3:
+                bits.append("STILL STUCK")
+            detail = " - ".join(bits) if bits else "no recent scan"
+
+            tab_tag = " [%s]" % tab if tab else ""
+            lines.append("- **%s** %s%s -- %s%s: %s"
+                         % (carrier, tracking, box_tag, name, tab_tag, detail))
+
+    return NL.join(lines)
+
+
+def send_founders_alert(lark, alerts, chat_id=None):
+    """Post a red-banner alert card to the founders channel.
+
+    Reuses the existing LarkClient red card helpers so no changes to
+    lark_client.py are required.
+    """
+    target = LARK_FOUNDERS_CHAT_ID or LARK_CHAT_ID
+    if not target:
+        logger.warning("No alert channel configured -- skipping alert for %d "
+                       "shipments", len(alerts))
+        return False
+    if not LARK_FOUNDERS_CHAT_ID:
+        logger.info("LARK_CHAT_ID_FOUNDERS not set -- routing %d alert(s) to the "
+                    "main deliveries channel as a fallback", len(alerts))
+    if not alerts:
+        return False
+
+    message = build_message(alerts)
+    try:
+        card = lark._build_alert_card(message)
+        lark._send_card("", target, card_json=card)
+        logger.info("Founders alert sent (%d shipments)", len(alerts))
+        return True
+    except Exception as e:
+        logger.warning("Founders alert card failed (%s), trying plain text", e)
+        try:
+            lark._send_text(message, target)
+            return True
+        except Exception as e2:
+            logger.error("Founders alert plain text also failed: %s", e2)
+            return False
+
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
+def run_stuck_detection(all_results, lark, state_path=None, chat_id=None):
+    """Load state, detect stuck shipments, alert the founders channel, save state.
+
+    Called once per run from main.run_tracker(). Safe to call even when no
+    founders channel is configured (it just logs and saves state).
+    """
+    path = state_path or SCAN_STATE_PATH
+    state = load_state(path)
+    alerts, state = detect(all_results, state)
+
+    if alerts:
+        logger.info("Stuck detector flagged %d shipment(s): %s",
+                    len(alerts), ", ".join(a["tracking_num"] for a in alerts))
+        send_founders_alert(lark, alerts, chat_id=chat_id)
+    else:
+        logger.info("Stuck detector: nothing new to flag")
+
+    save_state(state, path)
+    return alerts
