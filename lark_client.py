@@ -248,7 +248,18 @@ class LarkClient:
             carrier_raw = cell(row, i_carrier)
             num_boxes_raw = cell(row, i_num_boxes)
 
-            shipment_id = shipment_id_raw or last_shipment_id
+            # Carry-forward is for CONTINUATION rows -- the extra item lines
+            # under one shipment, which repeat nothing. A row carrying its own
+            # new tracking number is a new shipment, so it must not inherit the
+            # previous shipment's ID (that is how one auto-generated ID ends up
+            # stamped on a dozen unrelated rows).
+            starts_new_shipment = bool(tracking_raw) and tracking_raw != last_tracking
+            if starts_new_shipment:
+                last_shipment_id = ""
+                last_num_boxes = ""
+
+            shipment_id = shipment_id_raw or ("" if starts_new_shipment
+                                              else last_shipment_id)
             tracking = tracking_raw or ("" if (shipment_id_raw or cell(row, i_order)) else last_tracking)
             carrier = carrier_raw or last_carrier
             num_boxes = num_boxes_raw or last_num_boxes

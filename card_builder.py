@@ -397,6 +397,9 @@ def _detail(r, bucket):
     else:
         text = "In transit"
 
+    # "US" / "GB" alone is a country code, not a place worth appending.
+    if len(city) <= 3 and city.isupper():
+        city = ""
     if city and city.lower() not in text.lower():
         text = "%s, %s" % (text, city)
     return text

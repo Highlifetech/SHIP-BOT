@@ -366,8 +366,26 @@ def health():
 # Startup
 # -------------------------------------------------------------------------
 
+def _warm_snapshot():
+    """Prime the scan cache at boot.
+
+    Without this the first person to open the dashboard pays for a full
+    read-only scan of every sheet -- measured at 51s in production, close
+    enough to gunicorn's 120s timeout to matter. Runs in the background so
+    it never delays the worker coming up, and it is read-only: no sheet
+    writes, no chat message.
+    """
+    try:
+        results = run_tracker(dry_run=True)
+        chat.update_snapshot(results)
+        logger.info("Startup snapshot warmed: %d shipments", len(results))
+    except Exception as e:
+        logger.warning("Startup snapshot warm-up failed: %s", e)
+
+
 _fetch_bot_open_id()
 dashboard.register(app, chat, run_tracker, lark)
+threading.Thread(target=_warm_snapshot, daemon=True).start()
 start_scheduler()
 
 if __name__ == "__main__":
