@@ -1,0 +1,1347 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shipment Tracker — Off Menu</title>
+<style>
+:root{
+  --bg:#f5f6f8; --surface:#fff; --sunken:#fafbfc;
+  --ink:#101318; --ink-2:#4a525e; --ink-3:#8b929e;
+  --line:#e6e8ec; --line-2:#eff1f4;
+  --blue:#2563eb; --blue-soft:#eef3ff;
+  --red:#dc2626; --red-soft:#fdeeee;
+  --amber:#e08700; --amber-soft:#fdf4e3;
+  --green:#15803d; --green-soft:#eaf6ee;
+  --grey:#9aa1ad; --grey-soft:#f2f3f5;
+  --radius:14px; --shadow:0 1px 2px rgba(16,19,24,.05),0 1px 3px rgba(16,19,24,.04);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme=light]){
+    --bg:#0e1013; --surface:#171a1f; --sunken:#1c2026;
+    --ink:#e9ebee; --ink-2:#a8b0bc; --ink-3:#79808c;
+    --line:#272b32; --line-2:#22262c;
+    --blue:#5b8cff; --blue-soft:#182238;
+    --red:#f27272; --red-soft:#2e1c1d;
+    --amber:#e0a33d; --amber-soft:#2c2417;
+    --green:#5cbe80; --green-soft:#16281d;
+    --grey:#7b828e; --grey-soft:#1f232a;
+    --shadow:0 1px 2px rgba(0,0,0,.4);
+  }
+}
+:root[data-theme=dark]{
+  --bg:#0e1013; --surface:#171a1f; --sunken:#1c2026;
+  --ink:#e9ebee; --ink-2:#a8b0bc; --ink-3:#79808c;
+  --line:#272b32; --line-2:#22262c;
+  --blue:#5b8cff; --blue-soft:#182238;
+  --red:#f27272; --red-soft:#2e1c1d;
+  --amber:#e0a33d; --amber-soft:#2c2417;
+  --green:#5cbe80; --green-soft:#16281d;
+  --grey:#7b828e; --grey-soft:#1f232a;
+  --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  background:var(--bg); color:var(--ink);
+  font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased; padding:22px 18px 64px;
+}
+.wrap{max-width:1720px;margin:0 auto;width:100%}
+@media (min-width:1280px){body{padding-left:28px;padding-right:28px}}
+a{color:inherit}
+
+/* ---------- header ---------- */
+.topbar{display:flex;align-items:flex-start;gap:16px;margin-bottom:18px;flex-wrap:wrap}
+.brand{display:flex;gap:13px;align-items:center;flex:1 1 320px;min-width:0}
+.logo{width:42px;height:42px;border-radius:11px;background:var(--blue);color:#fff;display:grid;place-items:center;flex:none}
+.logo svg{width:22px;height:22px}
+h1{font-size:23px;line-height:1.2;margin:0;letter-spacing:-.02em;font-weight:680}
+.sub{color:var(--ink-3);font-size:13px;margin-top:2px}
+.updated{text-align:right;color:var(--ink-3);font-size:12px;line-height:1.35}
+.updated b{display:block;color:var(--ink-2);font-weight:560}
+
+/* ---------- buttons ---------- */
+.btn{
+  display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);
+  background:var(--surface);color:var(--ink);border-radius:9px;padding:8px 14px;
+  font:inherit;font-size:13px;font-weight:550;cursor:pointer;white-space:nowrap;
+  transition:background .12s,border-color .12s;
+}
+.btn:hover{background:var(--sunken)}
+.btn.sm{padding:5px 11px;font-size:12.5px;border-radius:7px}
+.btn.attn{color:var(--red);background:var(--red-soft);border-color:transparent}
+.btn.attn:hover{filter:brightness(.97)}
+.btn svg{width:14px;height:14px;flex:none}
+.btn[disabled]{opacity:.5;cursor:default}
+
+/* ---------- kpi tiles ---------- */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(178px,1fr));gap:12px;margin-bottom:18px}
+.kpi{
+  border-radius:var(--radius);padding:15px 16px;border:1px solid transparent;
+  background:var(--surface);box-shadow:var(--shadow);cursor:pointer;text-align:left;
+  font:inherit;color:inherit;transition:transform .1s,box-shadow .12s;
+}
+.kpi:hover{transform:translateY(-1px);box-shadow:0 3px 10px rgba(16,19,24,.09)}
+.kpi[aria-pressed=true]{outline:2px solid var(--blue);outline-offset:1px}
+.kpi .top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.kpi .n{font-size:29px;font-weight:700;letter-spacing:-.03em;line-height:1}
+.kpi .ico{width:24px;height:24px;display:grid;place-items:center;opacity:.85}
+.kpi .ico svg{width:19px;height:19px}
+.kpi .lbl{display:flex;align-items:center;gap:7px;margin-top:11px;font-weight:600;font-size:13.5px}
+.kpi .hint{color:var(--ink-3);font-size:12px;margin-top:2px}
+.kpi.k-red{background:var(--red-soft)} .kpi.k-red .n{color:var(--red)}
+.kpi.k-amber{background:var(--amber-soft)} .kpi.k-amber .n{color:var(--amber)}
+.kpi.k-blue{background:var(--blue-soft)} .kpi.k-blue .n{color:var(--blue)}
+.kpi.k-grey{background:var(--surface)}
+.kpi.k-green{background:var(--green-soft)} .kpi.k-green .n{color:var(--green)}
+
+.dot{width:9px;height:9px;border-radius:50%;flex:none}
+.d-flagged{background:var(--red)} .d-arriving{background:var(--amber)}
+.d-transit{background:var(--blue)} .d-unscanned{background:var(--grey)}
+.d-delivered{background:var(--green)}
+
+/* ---------- filters ---------- */
+.chips{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:12px}
+.chip{
+  display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);
+  background:var(--surface);border-radius:10px;padding:8px 15px;font:inherit;
+  font-size:13.5px;font-weight:550;cursor:pointer;color:var(--ink);
+}
+.chip:hover{background:var(--sunken)}
+.chip[aria-pressed=true]{background:var(--blue);border-color:var(--blue);color:#fff}
+.chip[aria-pressed=true] .dot{box-shadow:0 0 0 2px rgba(255,255,255,.5)}
+.chip .c{opacity:.6;font-variant-numeric:tabular-nums}
+
+.controls{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;align-items:center}
+.field{
+  display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);
+  background:var(--surface);border-radius:10px;padding:0 12px;height:40px;color:var(--ink-2);
+}
+.field svg{width:15px;height:15px;flex:none;opacity:.65}
+.field select,.field input{
+  border:0;background:transparent;font:inherit;font-size:13.5px;color:var(--ink);
+  outline:none;padding:0;height:100%;min-width:0;
+}
+.field select{cursor:pointer;padding-right:4px}
+.field.search{flex:1 1 260px;min-width:200px}
+.field.search input{width:100%}
+.field.search input::placeholder{color:var(--ink-3)}
+
+/* ---------- groups ---------- */
+.group{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+  box-shadow:var(--shadow);margin-bottom:14px;overflow:hidden}
+.ghead{display:flex;align-items:center;gap:13px;padding:14px 16px;cursor:pointer;user-select:none}
+.ghead:hover{background:var(--sunken)}
+.caret{width:16px;height:16px;flex:none;color:var(--ink-3);transition:transform .15s}
+.group.collapsed .caret{transform:rotate(-90deg)}
+.avatar{width:38px;height:38px;border-radius:10px;flex:none;display:grid;place-items:center;
+  font-size:12px;font-weight:700;letter-spacing:-.02em;background:var(--ink);color:var(--surface)}
+.gmeta{flex:1;min-width:0}
+.gname{font-weight:640;font-size:15px;letter-spacing:-.01em}
+.gsub{color:var(--ink-3);font-size:12.5px;margin-top:1px;display:flex;gap:9px;flex-wrap:wrap}
+.gsub span{white-space:nowrap}
+.gsub .sep{opacity:.45}
+.group.collapsed .rows{display:none}
+
+.rows{border-top:1px solid var(--line-2)}
+.row{display:grid;grid-template-columns:20px 132px minmax(180px,1.5fr) 74px 84px 96px 150px auto;
+  gap:14px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line-2)}
+.row:last-child{border-bottom:0}
+.row:hover{background:var(--sunken)}
+.sid{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;font-weight:600;letter-spacing:-.02em}
+.what{min-width:0}
+.what .t{font-weight:520;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.what .prod{font-size:12.5px;color:var(--ink-2);margin-top:2px}
+.what .qty{font-variant-numeric:tabular-nums;color:var(--ink-3)}
+.what .qty.short{color:var(--red);font-weight:560}
+.what .trk{color:var(--ink-3);font-size:12px;font-family:ui-monospace,Menlo,monospace;margin-top:1px}
+.carrier{font-size:12.5px;font-weight:640;color:var(--ink-2)}
+.boxes{font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.eta .k,.upd .k{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.eta .v{font-weight:620;font-size:13px}
+.eta .v.today{color:var(--green)} .eta .v.unknown{color:var(--red)} .eta .v.late{color:var(--red)}
+.upd{font-size:12.5px;color:var(--ink-2)}
+.upd .loc{color:var(--ink-3);font-size:12px}
+.acts{display:flex;gap:7px;justify-content:flex-end;flex-wrap:wrap}
+.more{padding:11px 16px;font-size:13px;color:var(--blue);cursor:pointer;font-weight:550;background:none;border:0;font-family:inherit}
+.more:hover{text-decoration:underline}
+
+/* ---------- footer strip ---------- */
+.strip{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+  box-shadow:var(--shadow);padding:15px 17px;margin-top:18px}
+.strip h2{font-size:14px;margin:0 0 12px;display:flex;align-items:center;gap:8px;font-weight:620}
+.strip h2 svg{width:15px;height:15px;opacity:.6}
+.deltas{display:flex;gap:26px;flex-wrap:wrap}
+.delta{display:flex;align-items:center;gap:9px}
+.delta .n{font-size:20px;font-weight:700;letter-spacing:-.02em}
+.delta .l{font-size:13px;color:var(--ink-2)}
+.quick{display:flex;gap:9px;flex-wrap:wrap;margin-top:18px}
+
+.empty{background:var(--surface);border:1px dashed var(--line);border-radius:var(--radius);
+  padding:46px 20px;text-align:center;color:var(--ink-3)}
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(10px);
+  background:var(--ink);color:var(--bg);padding:11px 19px;border-radius:10px;font-size:13.5px;
+  font-weight:550;opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;z-index:50}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+.spin{animation:sp 1s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (max-width:980px){
+  .row{grid-template-columns:20px 1fr;gap:6px 12px}
+  .row>*{grid-column:2}
+  .row .stat{grid-column:1;grid-row:1}
+  .acts{justify-content:flex-start;margin-top:4px}
+  .eta,.upd{display:flex;gap:8px;align-items:baseline}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="topbar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 8v8a2 2 0 0 1-1 1.7l-7 4a2 2 0 0 1-2 0l-7-4A2 2 0 0 1 3 16V8a2 2 0 0 1 1-1.7l7-4a2 2 0 0 1 2 0l7 4A2 2 0 0 1 21 8z"/>
+          <path d="m3.3 7 8.7 5 8.7-5M12 22V12"/>
+        </svg>
+      </div>
+      <div>
+        <h1>Shipment Tracker</h1>
+        <div class="sub" id="subtitle">All active shipments across Off Menu</div>
+      </div>
+    </div>
+    <div class="updated">
+      <span>Last updated</span>
+      <b id="updated">—</b>
+    </div>
+    <button class="btn go" id="mk-open">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      Add shipment
+    </button>
+    <button class="btn" id="refresh">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6"/>
+      </svg>
+      Refresh
+    </button>
+  </div>
+
+  <div class="kpis" id="kpis"></div>
+  <div class="chips" id="chips"></div>
+
+  <div class="controls">
+    <label class="field">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 21V7l9-4 9 4v14M9 21v-6h6v6"/></svg>
+      <select id="f-client"><option value="">All clients</option></select>
+    </label>
+    <label class="field">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg>
+      <select id="f-owner"><option value="">All owners</option></select>
+    </label>
+    <label class="field">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M2 7h11v9H2zM13 10h4l4 3v3h-8z"/><circle cx="6" cy="18" r="1.8"/><circle cx="17" cy="18" r="1.8"/></svg>
+      <select id="f-carrier"><option value="">All carriers</option></select>
+    </label>
+    <label class="field search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" type="search" placeholder="Search SO, tracking #, client, or location…" autocomplete="off">
+    </label>
+    <label class="field">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+      <select id="groupby">
+        <option value="client">Group by client</option>
+        <option value="owner">Group by owner</option>
+        <option value="carrier">Group by carrier</option>
+        <option value="none">No grouping</option>
+      </select>
+    </label>
+    <label class="field">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M7 4v16m0 0-3-3m3 3 3-3M17 20V4m0 0-3 3m3-3 3 3"/></svg>
+      <select id="sort">
+        <option value="urgency">Most urgent</option>
+        <option value="eta">Soonest ETA</option>
+        <option value="recent">Most recent update</option>
+        <option value="client">Client A–Z</option>
+      </select>
+    </label>
+  </div>
+
+  <div id="groups"></div>
+
+  <div class="strip" id="strip" hidden>
+    <h2>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+      <span id="strip-title">Needs a decision</span>
+    </h2>
+    <div class="deltas" id="deltas"></div>
+  </div>
+
+  <div class="quick">
+    <button class="btn" data-quick="flagged">Show flagged</button>
+    <button class="btn" data-quick="today">Arriving today</button>
+    <button class="btn" data-quick="unscanned">Never scanned</button>
+    <button class="btn" data-quick="clear">Clear filters</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var STATUS = {
+    flagged:   {label: "Needs attention", hint: "Shipments require action", cls: "k-red",   icon: "alert"},
+    arriving:  {label: "Out for delivery", hint: "Arriving today",          cls: "k-amber", icon: "truck"},
+    transit:   {label: "In transit",       hint: "On the way",              cls: "k-blue",  icon: "plane"},
+    unscanned: {label: "Not scanned",      hint: "Label created",           cls: "k-grey",  icon: "doc"},
+    delivered: {label: "Delivered",        hint: "Closed out",              cls: "k-green", icon: "check"}
+  };
+  var ORDER = ["flagged", "arriving", "transit", "unscanned"];
+  var ICONS = {
+    alert: '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.2v.1"/>',
+    truck: '<path d="M2 7h11v9H2zM13 10h4l4 3v3h-8z"/><circle cx="6" cy="18" r="1.8"/><circle cx="17" cy="18" r="1.8"/>',
+    plane: '<path d="M2 13.5 21 4l-5 9.5 5 6.5-8-3-4 3-1-5z"/>',
+    doc:   '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
+    check: '<circle cx="12" cy="12" r="9"/><path d="m8.5 12.2 2.4 2.4 4.6-4.8"/>'
+  };
+
+  var state = {
+    data: {shipments: [], totals: {}, owners: [], clients: [], carriers: []},
+    status: "all", client: "", owner: "", carrier: "", q: "", sort: "urgency",
+    groupby: "client",
+    collapsed: {}, expanded: {}, busy: false
+  };
+
+  // ?status=flagged (or #flagged) arrives from the Lark card's buttons, so a
+  // chip there opens the board already filtered to those shipments.
+  (function () {
+    var known = {all: 1, flagged: 1, arriving: 1, transit: 1, unscanned: 1, delivered: 1};
+    var want = new URLSearchParams(location.search).get("status") ||
+               (location.hash || "").replace(/^#/, "");
+    if (want && known[want]) state.status = want;
+    var client = new URLSearchParams(location.search).get("client");
+    if (client) state.client = client;
+  })();
+
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c];
+    });
+  };
+  function svg(path, w) {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="' +
+      (w || 1.9) + '" stroke-linecap="round" stroke-linejoin="round">' + path + "</svg>";
+  }
+  function toast(msg) {
+    var t = $("toast");
+    t.textContent = msg; t.classList.add("on");
+    clearTimeout(t._t); t._t = setTimeout(function () { t.classList.remove("on"); }, 2600);
+  }
+  function initials(name) {
+    var w = String(name || "?").replace(/[^A-Za-z0-9 ]/g, " ").trim().split(/\s+/);
+    if (!w[0]) return "?";
+    return (w.length > 1 ? w[0][0] + w[1][0] : w[0].slice(0, 2)).toUpperCase();
+  }
+  function hue(name) {
+    var h = 0, s = String(name || "");
+    for (var i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) % 360; }
+    return h;
+  }
+
+  // ---------- filtering ----------
+  function visible() {
+    var q = state.q.trim().toLowerCase();
+    return state.data.shipments.filter(function (s) {
+      if (state.status !== "all" && s.status !== state.status) return false;
+      if (state.client && s.client !== state.client) return false;
+      if (state.owner && s.owner !== state.owner) return false;
+      if (state.carrier && s.carrier !== state.carrier) return false;
+      if (q) {
+        var hay = [s.id, s.tracking, s.client, s.owner, s.carrier, s.detail,
+                   s.location, s.eta_label].join(" ").toLowerCase();
+        if (hay.indexOf(q) === -1) return false;
+      }
+      return true;
+    });
+  }
+
+  var RANK = {flagged: 0, arriving: 1, transit: 2, unscanned: 3, delivered: 4};
+  function sortRows(rows) {
+    var by = state.sort;
+    return rows.slice().sort(function (a, b) {
+      if (by === "client") return a.client.localeCompare(b.client) || a.id.localeCompare(b.id);
+      if (by === "eta") {
+        var ea = a.eta || "9999", eb = b.eta || "9999";
+        return ea < eb ? -1 : ea > eb ? 1 : a.id.localeCompare(b.id);
+      }
+      if (by === "recent") {
+        var ra = a.eta || "", rb = b.eta || "";
+        return rb.localeCompare(ra) || a.id.localeCompare(b.id);
+      }
+      return (RANK[a.status] - RANK[b.status]) ||
+             (b.overdue_days - a.overdue_days) ||
+             a.id.localeCompare(b.id);
+    });
+  }
+
+  // ---------- render ----------
+  function renderKpis() {
+    var t = state.data.totals || {};
+    var counts = {
+      flagged: t.flagged || 0, arriving: t.arriving || 0, transit: t.transit || 0,
+      unscanned: t.unscanned || 0, delivered: t.delivered || 0
+    };
+    var keys = ORDER.concat(["delivered"]);
+    $("kpis").innerHTML = keys.map(function (k) {
+      var m = STATUS[k], active = state.status === k;
+      var isFilter = k !== "delivered";
+      return '<' + (isFilter ? "button" : "div") + ' class="kpi ' + m.cls + '"' +
+        (isFilter ? ' data-status="' + k + '" aria-pressed="' + active + '"'
+                  : ' style="cursor:default"') + ">" +
+        '<div class="top"><div class="n">' + counts[k] + '</div>' +
+        '<div class="ico">' + svg(ICONS[m.icon]) + "</div></div>" +
+        '<div class="lbl"><span class="dot d-' + k + '"></span>' + m.label + "</div>" +
+        '<div class="hint">' + m.hint + "</div></" + (isFilter ? "button" : "div") + ">";
+    }).join("");
+  }
+
+  function renderChips() {
+    var all = state.data.shipments.length;
+    var per = {};
+    state.data.shipments.forEach(function (s) { per[s.status] = (per[s.status] || 0) + 1; });
+    var html = ['<button class="chip" data-status="all" aria-pressed="' +
+      (state.status === "all") + '">All shipments <span class="c">' + all + "</span></button>"];
+    ORDER.forEach(function (k) {
+      html.push('<button class="chip" data-status="' + k + '" aria-pressed="' +
+        (state.status === k) + '"><span class="dot d-' + k + '"></span>' +
+        STATUS[k].label + ' <span class="c">' + (per[k] || 0) + "</span></button>");
+    });
+    $("chips").innerHTML = html.join("");
+  }
+
+  function fillSelect(el, values, current, allLabel) {
+    el.innerHTML = '<option value="">' + allLabel + "</option>" +
+      values.map(function (v) {
+        return '<option value="' + esc(v) + '"' + (v === current ? " selected" : "") +
+          ">" + esc(v) + "</option>";
+      }).join("");
+  }
+
+  function rowHtml(s) {
+    var etaCls = s.overdue_days ? "late"
+      : s.eta_label === "Today" ? "today"
+      : s.eta_label === "Unknown" ? "unknown" : "";
+    var etaText = s.overdue_days ? s.eta_label + " · " + s.overdue_days + "d late" : s.eta_label;
+    var track = s.track_url
+      ? '<a class="btn sm" href="' + esc(s.track_url) + '" target="_blank" rel="noopener">Track</a>'
+      : '<span class="btn sm" style="opacity:.45">No link</span>';
+    var second = s.status === "flagged"
+      ? '<button class="btn sm attn" data-act="deliver" data-handle="' + esc(s.handle) + '">Mark delivered</button>'
+      : '<button class="btn sm" data-act="deliver" data-handle="' + esc(s.handle) + '">Mark delivered</button>';
+    // Opens the whole set -- a label and a packing list for every box --
+    // in Off Menu's template, with anything the sheet couldn't fill flagged
+    // at the top before it prints.
+    var boxes = s.boxes > 1 ? " (" + s.boxes + ")" : "";
+    var packing = s.tracking
+      ? '<a class="btn sm" href="' + apiBase().replace(/\/api$/, "") + '/packing-list?tracking=' +
+        encodeURIComponent(s.tracking) + '&t=' + encodeURIComponent(token()) +
+        '" target="_blank" rel="noopener">Packing lists' + boxes + '</a>'
+      : "";
+
+    return '<div class="row">' +
+      '<span class="stat dot d-' + s.status + '" title="' + esc(s.status_label) + '"></span>' +
+      '<div class="sid">' + esc(s.id) + "</div>" +
+      '<div class="what"><div class="t">' + esc(s.detail) + "</div>" +
+        (s.product ? '<div class="prod">' + esc(s.product) +
+          (s.qty_ordered ? ' <span class="qty' + (s.short ? " short" : "") + '">' +
+            s.qty_shipped + " of " + s.qty_ordered +
+            (s.short ? " · " + s.short + " short" : "") + "</span>" : "") + "</div>" : "") +
+        (s.tracking ? '<div class="trk">' + esc(s.tracking) + "</div>" : "") + "</div>" +
+      '<div class="carrier">' + esc(s.carrier) + "</div>" +
+      '<div class="boxes">' + (s.boxes ? s.boxes + " boxes" : "—") + "</div>" +
+      '<div class="eta"><div class="k">ETA</div><div class="v ' + etaCls + '">' + esc(etaText) + "</div></div>" +
+      '<div class="upd"><div class="k">Where</div>' +
+        '<div class="loc">' + esc(s.location || "—") + "</div></div>" +
+      '<div class="acts">' + track + packing + second + "</div>" +
+    "</div>";
+  }
+
+  function renderGroups() {
+    var rows = sortRows(visible());
+    var host = $("groups");
+    if (!rows.length) {
+      host.innerHTML = '<div class="empty">Nothing matches those filters.</div>';
+      return;
+    }
+    var key = state.groupby;
+    if (key === "none") {
+      host.innerHTML = '<section class="group"><div class="rows">' +
+        rows.map(rowHtml).join("") + "</div></section>";
+      return;
+    }
+    var by = {};
+    rows.forEach(function (s) {
+      var k = key === "owner" ? s.owner : key === "carrier" ? s.carrier : s.client;
+      (by[k] = by[k] || []).push(s);
+    });
+
+    var names = Object.keys(by).sort(function (a, b) {
+      var fa = by[a].filter(function (s) { return s.status === "flagged"; }).length;
+      var fb = by[b].filter(function (s) { return s.status === "flagged"; }).length;
+      return (fb - fa) || (by[b].length - by[a].length) || a.localeCompare(b);
+    });
+
+    host.innerHTML = names.map(function (name) {
+      var list = by[name];
+      var flagged = list.filter(function (s) { return s.status === "flagged"; }).length;
+      var arriving = list.filter(function (s) { return s.status === "arriving"; }).length;
+      var owners = {};
+      list.forEach(function (s) {
+        owners[key === "owner" ? s.client : s.owner] = 1;
+      });
+      var open = state.expanded[name] ? list.length : Math.min(list.length, 3);
+      var bits = ['<span>' + list.length + " active shipment" + (list.length === 1 ? "" : "s") + "</span>"];
+      if (flagged) bits.push('<span class="sep">|</span><span>' + flagged + " needs attention</span>");
+      if (arriving) bits.push('<span class="sep">|</span><span>' + arriving + " out for delivery</span>");
+      var side = Object.keys(owners).sort();
+      if (side.length) {
+        bits.push('<span class="sep">|</span><span>' +
+          esc(side.slice(0, 3).join(", ") +
+              (side.length > 3 ? " +" + (side.length - 3) : "")) + "</span>");
+      }
+
+      return '<section class="group' + (state.collapsed[name] ? " collapsed" : "") +
+        '" data-client="' + esc(name) + '">' +
+        '<header class="ghead" data-toggle="' + esc(name) + '">' +
+          '<span class="caret">' + svg('<path d="m6 9 6 6 6-6"/>', 2) + "</span>" +
+          '<span class="avatar" style="background:hsl(' + hue(name) + ' 42% 32%)">' +
+            esc(initials(name)) + "</span>" +
+          '<span class="gmeta"><span class="gname">' + esc(name) + "</span>" +
+            '<span class="gsub">' + bits.join("") + "</span></span>" +
+        "</header>" +
+        '<div class="rows">' + list.slice(0, open).map(rowHtml).join("") +
+          (list.length > open
+            ? '<button class="more" data-expand="' + esc(name) + '">+ ' +
+              (list.length - open) + " more shipment" + (list.length - open === 1 ? "" : "s") + "</button>"
+            : "") +
+        "</div></section>";
+    }).join("");
+  }
+
+  function renderStrip() {
+    var s = state.data.shipments;
+    var overdue = s.filter(function (x) { return x.overdue_days > 0; }).length;
+    var noEta = s.filter(function (x) { return !x.eta && x.status !== "unscanned"; }).length;
+    var today = s.filter(function (x) { return x.eta_label === "Today"; }).length;
+    var stuck = s.filter(function (x) { return x.status === "flagged" && !x.overdue_days; }).length;
+    var items = [
+      ["flagged", stuck, "Carrier exceptions"],
+      ["flagged", overdue, "Past ETA, never scanned"],
+      ["arriving", today, "Landing today"],
+      ["unscanned", noEta, "No ETA from carrier"]
+    ];
+    $("deltas").innerHTML = items.map(function (i) {
+      return '<div class="delta"><span class="n">' + i[1] + "</span>" +
+        '<span class="dot d-' + i[0] + '"></span><span class="l">' + i[2] + "</span></div>";
+    }).join("");
+    $("strip").hidden = false;
+  }
+
+  function render() {
+    renderKpis(); renderChips();
+    fillSelect($("f-client"), state.data.clients || [], state.client, "All clients");
+    fillSelect($("f-owner"), state.data.owners || [], state.owner, "All owners");
+    fillSelect($("f-carrier"), state.data.carriers || [], state.carrier, "All carriers");
+    $("sort").value = state.sort;
+    $("groupby").value = state.groupby;
+    $("updated").textContent = state.data.updated_label || "—";
+    var t = state.data.totals || {};
+    $("subtitle").textContent = (t.open || 0) + " open shipments across " +
+      (state.data.sheet_count || 0) + " sheets";
+    renderGroups(); renderStrip();
+  }
+
+  // ---------- data ----------
+  function apiBase() {
+    var p = location.pathname.replace(/\/dashboard\/?$/, "");
+    return p + "/api";
+  }
+  function token() {
+    return new URLSearchParams(location.search).get("t") || "";
+  }
+  window.__shipbotReload = function () { load(true); };
+  function load(force) {
+    if (window.__SHIPBOT_DATA__ && !force) {
+      state.data = window.__SHIPBOT_DATA__; render(); return Promise.resolve();
+    }
+    return fetch(apiBase() + "/shipments?t=" + encodeURIComponent(token()) +
+                 (force ? "&refresh=1" : ""))
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function (d) { state.data = d; render(); })
+      .catch(function (e) {
+        if (window.__SHIPBOT_DATA__) {          // static preview: no API behind it
+          state.data = window.__SHIPBOT_DATA__; render();
+          toast("Preview data — live refresh needs the Railway service");
+          return;
+        }
+        toast("Couldn't load shipments — " + e.message);
+      });
+  }
+
+  function markDelivered(handle, btn) {
+    if (state.busy) return;
+    state.busy = true; btn.disabled = true; btn.textContent = "Saving…";
+    fetch(apiBase() + "/mark-delivered?t=" + encodeURIComponent(token()), {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({handle: handle})
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d && d.ok) {
+          state.data.shipments = state.data.shipments.filter(function (s) {
+            return s.handle !== handle;
+          });
+          var t = state.data.totals;
+          t.open = Math.max(0, (t.open || 1) - 1);
+          t.delivered = (t.delivered || 0) + 1;
+          render(); toast("Marked delivered — written to the sheet");
+        } else {
+          btn.disabled = false; btn.textContent = "Mark delivered";
+          toast((d && d.error) || "Couldn't write to the sheet");
+        }
+      })
+      .catch(function (e) {
+        btn.disabled = false; btn.textContent = "Mark delivered";
+        toast("Couldn't write to the sheet — " + e.message);
+      })
+      .then(function () { state.busy = false; });
+  }
+
+  // ---------- events ----------
+  document.addEventListener("click", function (ev) {
+    var kpi = ev.target.closest("[data-status]");
+    if (kpi) {
+      var v = kpi.getAttribute("data-status");
+      state.status = (state.status === v && v !== "all") ? "all" : v;
+      render(); return;
+    }
+    var head = ev.target.closest("[data-toggle]");
+    if (head) {
+      var n = head.getAttribute("data-toggle");
+      state.collapsed[n] = !state.collapsed[n];
+      head.parentElement.classList.toggle("collapsed"); return;
+    }
+    var more = ev.target.closest("[data-expand]");
+    if (more) { state.expanded[more.getAttribute("data-expand")] = true; renderGroups(); return; }
+
+    var act = ev.target.closest('[data-act="deliver"]');
+    if (act) { markDelivered(act.getAttribute("data-handle"), act); return; }
+
+    var quick = ev.target.closest("[data-quick]");
+    if (quick) {
+      var q = quick.getAttribute("data-quick");
+      if (q === "clear") {
+        state.status = "all"; state.client = ""; state.owner = "";
+        state.carrier = ""; state.q = ""; $("q").value = "";
+      } else if (q === "today") {
+        state.status = "all"; state.q = "today"; $("q").value = "today";
+      } else {
+        state.status = q;
+      }
+      render(); return;
+    }
+  });
+
+  $("f-client").addEventListener("change", function () { state.client = this.value; render(); });
+  $("f-owner").addEventListener("change", function () { state.owner = this.value; render(); });
+  $("f-carrier").addEventListener("change", function () { state.carrier = this.value; render(); });
+  $("sort").addEventListener("change", function () { state.sort = this.value; renderGroups(); });
+  $("groupby").addEventListener("change", function () {
+    state.groupby = this.value; state.expanded = {}; renderGroups();
+  });
+
+  var timer;
+  $("q").addEventListener("input", function () {
+    var v = this.value;
+    clearTimeout(timer);
+    timer = setTimeout(function () { state.q = v; renderGroups(); }, 120);
+  });
+
+  $("refresh").addEventListener("click", function () {
+    var b = this, ico = b.querySelector("svg");
+    if (b.disabled) return;
+    b.disabled = true; ico.classList.add("spin");
+    load(true).then(function () {
+      b.disabled = false; ico.classList.remove("spin"); toast("Refreshed");
+    });
+  });
+
+  load(false);
+})();
+</script>
+<!-- ===================== create shipment ===================== -->
+<style>
+.sheetwrap{position:fixed;inset:0;z-index:60;display:none}
+.sheetwrap [hidden]{display:none!important}
+.sheetwrap.on{display:block}
+.scrim{position:absolute;inset:0;background:rgba(16,19,24,.44);backdrop-filter:blur(2px)}
+.panel{position:absolute;inset:22px;max-width:1560px;margin:0 auto;background:var(--surface);
+  border-radius:18px;box-shadow:0 18px 60px rgba(16,19,24,.28);display:flex;flex-direction:column;overflow:hidden}
+.phead{display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid var(--line)}
+.phead h2{margin:0;font-size:16.5px;font-weight:640;letter-spacing:-.01em}
+.phead .x{margin-left:auto}
+.steps{display:flex;align-items:center;gap:6px;padding:12px 20px;border-bottom:1px solid var(--line);background:var(--sunken);overflow-x:auto}
+.step{display:flex;align-items:center;gap:8px;padding:6px 13px;border-radius:8px;font-size:12.5px;
+  font-weight:560;color:var(--ink-3);white-space:nowrap;border:1px solid transparent;background:none;font-family:inherit;cursor:pointer}
+.step b{width:19px;height:19px;border-radius:50%;background:var(--grey-soft);color:var(--ink-3);
+  display:grid;place-items:center;font-size:11px;font-weight:700;flex:none}
+.step.on{color:var(--ink);background:var(--surface);border-color:var(--line)}
+.step.on b{background:var(--blue);color:#fff}
+.step.done b{background:var(--green);color:#fff}
+.step.done{color:var(--ink-2)}
+.pbody{flex:1;overflow:auto;padding:18px 20px}
+.pfoot{display:flex;align-items:center;gap:10px;padding:13px 20px;border-top:1px solid var(--line);background:var(--sunken)}
+.pfoot .tally{margin-right:auto;font-size:13px;color:var(--ink-2)}
+.pfoot .tally b{color:var(--ink)}
+.btn.go{background:var(--blue);border-color:var(--blue);color:#fff}
+.btn.go:hover{filter:brightness(1.06);background:var(--blue)}
+.btn.go[disabled]{opacity:.45}
+.pane{display:none}
+.pane.on{display:block}
+.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+.bchip{padding:6px 12px;border-radius:20px;border:1px solid var(--line);background:var(--surface);
+  font:inherit;font-size:12.5px;font-weight:550;color:var(--ink-2);cursor:pointer;white-space:nowrap}
+.bchip.on{background:var(--ink);border-color:var(--ink);color:var(--surface)}
+.bchip span{opacity:.6;margin-left:5px;font-variant-numeric:tabular-nums}
+.filters input,.filters select{border:1px solid var(--line);background:var(--surface);color:var(--ink);
+  border-radius:9px;padding:7px 11px;font:inherit;font-size:13px}
+.filters input[type=search]{min-width:220px;flex:1}
+.otable{width:100%;border-collapse:collapse;font-size:13px}
+.otable th{text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);
+  font-weight:620;padding:8px 10px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--surface)}
+.otable td{padding:9px 10px;border-bottom:1px solid var(--line-2);vertical-align:middle}
+.otable tr.sel td{background:var(--blue-soft)}
+.otable .n{text-align:right;font-variant-numeric:tabular-nums;width:82px}
+.otable .pick{width:34px}
+.otable input[type=checkbox]{width:15px;height:15px;accent-color:var(--blue)}
+.otable .prod{font-weight:560}
+.otable .so{width:150px}
+.otable .ph{width:56px;padding-right:0}
+.manrow{display:flex;gap:8px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line-2)}
+.manrow input{border:1px solid var(--line);border-radius:8px;padding:6px 9px;font:inherit;
+  font-size:13px;background:var(--surface);color:var(--ink)}
+.manrow .m-prod{flex:1;min-width:150px}
+.manrow .m-so{width:130px}
+.manrow .m-client{width:170px}
+.manrow .m-qty{width:90px;text-align:right;font-variant-numeric:tabular-nums}
+.manrow .drop{border:0;background:none;color:var(--ink-3);font:inherit;font-size:16px;
+  cursor:pointer;padding:0 6px;line-height:1}
+.manrow .drop:hover{color:var(--red)}
+.manhead{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);
+  font-weight:620;margin:4px 0 2px}
+.thumb{width:44px;height:44px;border-radius:8px;object-fit:cover;border:1px solid var(--line);display:block}
+.thumb.none{display:grid;place-items:center;background:var(--sunken);color:var(--ink-3);
+  font-weight:700;font-size:15px}
+.otable .sonum{font-weight:620;font-variant-numeric:tabular-nums}
+.otable .meta{color:var(--ink-3);font-size:11.5px;margin-top:1px}
+.qin{width:74px;border:1px solid var(--line);border-radius:7px;padding:5px 7px;font:inherit;
+  font-size:13px;text-align:right;background:var(--surface);color:var(--ink);font-variant-numeric:tabular-nums}
+.empty{padding:34px 10px;text-align:center;color:var(--ink-3);font-size:13.5px}
+.boxgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-top:14px}
+.boxcard{border:1px solid var(--line);border-radius:12px;padding:12px 13px;background:var(--sunken)}
+.boxcard h4{margin:0 0 8px;font-size:13px;font-weight:640;display:flex;align-items:center;gap:7px}
+.boxcard h4 em{margin-left:auto;font-style:normal;font-weight:550;color:var(--ink-3);font-size:12px}
+.boxcard ul{margin:0;padding-left:16px;font-size:12.5px;color:var(--ink-2)}
+.boxcard li{margin:2px 0}
+.boxcard.void{border-style:dashed;color:var(--amber)}
+.allocrow{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line-2)}
+.allocrow .who{flex:1;min-width:0}
+.allocrow .who div:first-child{font-weight:560;font-size:13px}
+.allocrow select{border:1px solid var(--line);border-radius:8px;padding:5px 9px;font:inherit;
+  font-size:12.5px;background:var(--surface);color:var(--ink)}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+.fld{display:block}
+.fld span{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);
+  font-weight:620;margin-bottom:5px}
+.fld input,.fld textarea,.fld select{width:100%;border:1px solid var(--line);border-radius:9px;
+  padding:8px 11px;font:inherit;font-size:13.5px;background:var(--surface);color:var(--ink)}
+.fld textarea{min-height:78px;resize:vertical}
+.fld.req span:after{content:" *";color:var(--red)}
+.hint{font-size:12px;color:var(--ink-3);margin-top:5px}
+.probs{border-radius:12px;padding:12px 15px;font-size:13px;margin-bottom:14px;border-left:4px solid var(--amber);background:var(--amber-soft)}
+.probs.bad{border-left-color:var(--red);background:var(--red-soft)}
+.probs.good{border-left-color:var(--green);background:var(--green-soft)}
+.probs b{display:block;margin-bottom:5px}
+.probs ul{margin:0;padding-left:18px}
+.rev{border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.rev table{width:100%;border-collapse:collapse;font-size:12.5px}
+.rev th{background:var(--sunken);text-align:left;padding:8px 11px;font-size:11px;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--ink-3);font-weight:620}
+.rev td{padding:8px 11px;border-top:1px solid var(--line-2)}
+.rev .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px}
+.mkdone{text-align:center;padding:40px 20px}
+.mkdone .tick{width:52px;height:52px;border-radius:50%;background:var(--green-soft);color:var(--green);
+  display:grid;place-items:center;margin:0 auto 14px}
+.mkdone .tick svg{width:26px;height:26px}
+.mkdone h3{margin:0 0 6px;font-size:19px;font-weight:640}
+.mkdone p{margin:0 0 18px;color:var(--ink-2);font-size:13.5px}
+</style>
+
+<div class="sheetwrap" id="mk">
+  <div class="scrim" data-mk="close"></div>
+  <div class="panel" role="dialog" aria-label="Create shipment">
+    <div class="phead">
+      <h2>New shipment</h2>
+      <button class="btn x" data-mk="close">Close</button>
+    </div>
+    <div class="steps" id="mk-steps">
+      <button class="step on" data-step="0"><b>1</b>Order lines</button>
+      <button class="step" data-step="1"><b>2</b>Boxes</button>
+      <button class="step" data-step="2"><b>3</b>Shipment details</button>
+      <button class="step" data-step="3"><b>4</b>Review</button>
+    </div>
+
+    <div class="pbody">
+      <!-- 1: pick order lines -->
+      <div class="pane on" data-pane="0">
+        <div class="filters">
+          <div id="mk-boards"></div>
+          <select id="mk-client"><option value="">All clients</option></select>
+          <input id="mk-q" type="search" placeholder="Search product, PO, or client…" autocomplete="off">
+          <button class="btn sm" id="mk-reload">Reload orders</button>
+          <button class="btn sm" id="mk-manual">+ Add item manually</button>
+        </div>
+        <div id="mk-manual-list"></div>
+        <table class="otable">
+          <thead><tr>
+            <th class="pick"></th><th class="so">Sales order</th><th class="ph"></th>
+            <th>Product</th><th>Client</th><th class="n">Ordered</th>
+            <th class="n">Ship now</th>
+          </tr></thead>
+          <tbody id="mk-orders"></tbody>
+        </table>
+        <div class="empty" id="mk-orders-empty" hidden></div>
+      </div>
+
+      <!-- 2: boxes -->
+      <div class="pane" data-pane="1">
+        <div class="filters">
+          <label class="fld" style="max-width:150px">
+            <span>How many boxes</span>
+            <input id="mk-boxes" type="number" min="1" max="60" value="1">
+          </label>
+          <button class="btn sm" id="mk-spread">Spread evenly</button>
+          <button class="btn sm" id="mk-allone">All in box 1</button>
+        </div>
+        <div id="mk-alloc"></div>
+        <div class="boxgrid" id="mk-boxgrid"></div>
+      </div>
+
+      <!-- 3: details -->
+      <div class="pane" data-pane="2">
+        <div class="grid2">
+          <label class="fld req"><span>Client</span><input id="mk-f-client" autocomplete="off"></label>
+          <label class="fld req" id="mk-board-wrap" hidden><span>Board</span>
+            <select id="mk-f-board"></select>
+          </label>
+          <label class="fld req"><span>Carrier</span>
+            <input id="mk-f-carrier" list="mk-carriers" autocomplete="off" placeholder="UPS">
+            <datalist id="mk-carriers">
+              <option>UPS</option><option>FEDEX</option><option>DHL</option><option>USPS</option>
+              <option>SF EXPRESS</option><option>PUROLATOR</option><option>DPD</option><option>EWS</option>
+            </datalist>
+          </label>
+          <label class="fld req"><span>Tracking number</span><input id="mk-f-tracking" autocomplete="off" spellcheck="false"></label>
+          <label class="fld"><span>PO reference</span><input id="mk-f-po" autocomplete="off"></label>
+          <label class="fld"><span>Invoice #</span><input id="mk-f-invoice" autocomplete="off"></label>
+          <label class="fld"><span>DDP</span><input id="mk-f-ddp" autocomplete="off" placeholder="DDP / DDU"></label>
+          <label class="fld"><span>Date shipped</span><input id="mk-f-date" type="date"></label>
+          <label class="fld"><span>Ship to (name)</span><input id="mk-f-toname" autocomplete="off"></label>
+        </div>
+        <label class="fld" style="margin-top:14px"><span>Shipping address</span>
+          <textarea id="mk-f-shipto" placeholder="Street&#10;City, State ZIP&#10;Country"></textarea>
+        </label>
+        <label class="fld" style="margin-top:14px"><span>Special notes</span>
+          <textarea id="mk-f-notes" style="min-height:56px" placeholder="Anything the packing list should say"></textarea>
+        </label>
+        <div class="hint" id="mk-unmapped"></div>
+      </div>
+
+      <!-- 4: review -->
+      <div class="pane" data-pane="3">
+        <div id="mk-problems"></div>
+        <div class="rev" id="mk-review"></div>
+      </div>
+
+      <!-- created -->
+      <div class="pane" data-pane="4">
+        <div class="mkdone">
+          <div class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+            stroke-linecap="round" stroke-linejoin="round"><path d="m4 12.5 5.5 5.5L20 7"/></svg></div>
+          <h3 id="mk-done-t">Shipment created</h3>
+          <p id="mk-done-s"></p>
+          <a class="btn go" id="mk-done-pl" target="_blank" rel="noopener">Open packing lists</a>
+          <button class="btn" id="mk-done-again">Create another</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="pfoot">
+      <div class="tally" id="mk-tally">Nothing selected yet</div>
+      <button class="btn" id="mk-back" hidden>Back</button>
+      <button class="btn go" id="mk-next">Next</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  // The create flow keeps one piece of state: `picked`, a map of order-line
+  // key -> {line, qty, box}. Every pane reads and writes that, so a step can
+  // be revisited without losing what was already entered.
+  var mk = document.getElementById("mk");
+  var picked = Object.create(null);
+  // Field names as the template calls them, not as the code does.
+  var COLUMN_LABELS = {
+    box_num: "Which box each item went in", ship_to: "Shipping address",
+    invoice_num: "Invoice #", ship_date: "Date shipped", ddp: "DDP",
+    product_name: "Product name / description"
+  };
+  var orders = [], boardList = [], step = 0, board = "", loading = false;
+  // Lines typed by hand, for shipments that answer to no order line in the
+  // sheets -- samples, replacements, anything the team is shipping today that
+  // nobody entered upstream. They flow through the same create path.
+  var manual = [], manualSeq = 0;
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function $(id) { return document.getElementById(id); }
+  // Self-contained rather than borrowing the main script's helpers -- that
+  // one is an IIFE, and reaching into it would couple the two.
+  function apiBase() {
+    return location.pathname.replace(/\/dashboard\/?$/, "") + "/api";
+  }
+  function token() {
+    return new URLSearchParams(location.search).get("t") || "";
+  }
+  function authHeaders() { return { "X-Dashboard-Token": token() }; }
+  function postHeaders() {
+    return { "Content-Type": "application/json", "X-Dashboard-Token": token() };
+  }
+  function boxCount() { return Math.max(1, parseInt($("mk-boxes").value, 10) || 1); }
+  function chosen() {
+    var out = Object.keys(picked).map(function (k) { return picked[k]; });
+    return out.concat(manual.filter(function (m) { return m.line.product && m.qty > 0; }));
+  }
+  function units() { return chosen().reduce(function (a, p) { return a + (p.qty || 0); }, 0); }
+
+  function open() {
+    mk.classList.add("on");
+    document.body.style.overflow = "hidden";
+    if (!orders.length) loadOrders();
+    go(0);
+  }
+  function close() {
+    mk.classList.remove("on");
+    document.body.style.overflow = "";
+  }
+
+  // ---------------------------------------------------------- order lines
+  function loadOrders(force) {
+    if (loading) return;
+    loading = true;
+    $("mk-orders-empty").hidden = false;
+    $("mk-orders-empty").textContent = "Reading the sheets for open order lines…";
+    fetch(apiBase() + "/open-orders" + (force ? "?refresh=1" : ""), { headers: authHeaders() })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        orders = d.orders || [];
+        boardList = d.boards || [];
+        var sel = $("mk-client");
+        sel.innerHTML = '<option value="">All clients</option>' +
+          (d.clients || []).map(function (c) {
+            return '<option value="' + esc(c) + '">' + esc(c) + "</option>";
+          }).join("");
+        drawBoards();
+        drawOrders();
+      })
+      .catch(function (e) {
+        $("mk-orders-empty").hidden = false;
+        $("mk-orders-empty").textContent = "Could not load orders: " + e;
+      })
+      .finally(function () { loading = false; });
+  }
+
+  function drawBoards() {
+    $("mk-boards").innerHTML =
+      '<button class="bchip' + (board ? "" : " on") + '" data-board="">All boards</button>' +
+      boardList.map(function (b) {
+        return '<button class="bchip' + (board === b.board ? " on" : "") +
+          '" data-board="' + esc(b.board) + '">' + esc(b.board) +
+          "<span>" + b.lines + "</span></button>";
+      }).join("");
+  }
+
+  function visible() {
+    var q = ($("mk-q").value || "").toLowerCase().trim();
+    var client = $("mk-client").value;
+    return orders.filter(function (o) {
+      if (board && o.board !== board) return false;
+      if (client && o.client !== client) return false;
+      if (!q) return true;
+      return (o.product + " " + o.order_num + " " + o.client).toLowerCase().indexOf(q) >= 0;
+    });
+  }
+
+  function drawManual() {
+    var host = $("mk-manual-list");
+    if (!manual.length) { host.innerHTML = ""; return; }
+    host.innerHTML = '<div class="manhead">Added by hand</div>' + manual.map(function (m) {
+      return '<div class="manrow" data-man="' + m.line.key + '">' +
+        '<input class="m-so" placeholder="Sales order" value="' + esc(m.line.order_num) + '">' +
+        '<input class="m-prod" placeholder="Product" value="' + esc(m.line.product) + '">' +
+        '<input class="m-client" placeholder="Client" value="' + esc(m.line.client) + '">' +
+        '<input class="m-qty" type="number" min="1" placeholder="Qty" value="' +
+          (m.qty || "") + '">' +
+        '<button class="drop" title="Remove">&times;</button></div>';
+    }).join("");
+  }
+
+  function addManual() {
+    manualSeq += 1;
+    manual.push({
+      line: {key: "manual:" + manualSeq, product: "", client: "", order_num: "",
+             photo: "", ordered: 0, remaining: 0, board: "", sheet_token: "",
+             tab: ""},
+      qty: 0, box: 1
+    });
+    drawManual();
+    tally();
+  }
+
+  function drawOrders() {
+    var rows = visible();
+    var body = $("mk-orders");
+    body.innerHTML = rows.map(function (o) {
+      var p = picked[o.key];
+      // Sales order first -- that is how the team names a shipment, so it is
+      // what they scan the list by.
+      // What Hannah needs to recognise a line: the SO, the picture, and how
+      // many were ordered. Everything else is noise until she has picked it,
+      // so quantity shipped only becomes editable once the box is ticked.
+      var shot = (o.photo || "").indexOf("http") === 0
+        ? '<img class="thumb" src="' + esc(o.photo) + '" alt="" loading="lazy">'
+        : '<div class="thumb none">' + esc((o.product || "?").slice(0, 1).toUpperCase()) + "</div>";
+      var partial = o.shipped
+        ? '<div class="meta">' + o.shipped + " already shipped</div>"
+        : "";
+      return '<tr class="' + (p ? "sel" : "") + '" data-key="' + esc(o.key) + '">' +
+        '<td class="pick"><input type="checkbox"' + (p ? " checked" : "") + "></td>" +
+        '<td class="so"><div class="sonum">' + esc(o.order_num || "no SO #") + "</div>" +
+          '<div class="meta">' + esc(o.board) + "</div></td>" +
+        '<td class="ph">' + shot + "</td>" +
+        '<td><div class="prod">' + esc(o.product || "(no product name)") + "</div>" +
+          partial + "</td>" +
+        "<td>" + esc(o.client || "—") + "</td>" +
+        '<td class="n"><b>' + (o.ordered || o.remaining) + "</b></td>" +
+        '<td class="n"><input class="qin" type="number" min="0" max="' + o.remaining +
+          '" value="' + (p ? p.qty : o.remaining) + '"' + (p ? "" : " disabled") + "></td></tr>";
+    }).join("");
+    var none = !rows.length;
+    $("mk-orders-empty").hidden = !none;
+    if (none) {
+      $("mk-orders-empty").textContent = orders.length
+        ? "No open lines match those filters."
+        : "No open order lines found. Every line with a quantity ordered has already shipped — or the sheets have no quantity columns filled in.";
+    }
+    tally();
+  }
+
+  // -------------------------------------------------------------- boxes
+  function drawAlloc() {
+    var n = boxCount();
+    var opts = "";
+    for (var i = 1; i <= n; i++) opts += '<option value="' + i + '">Box ' + i + "</option>";
+    $("mk-alloc").innerHTML = chosen().map(function (p) {
+      return '<div class="allocrow" data-key="' + esc(p.line.key) + '">' +
+        '<div class="who"><div>' + esc(p.line.product || "(no product name)") + "</div>" +
+        '<div class="meta" style="color:var(--ink-3);font-size:12px">' +
+          esc(p.line.client) + " · " + p.qty + " units</div></div>" +
+        "<select>" + opts + "</select></div>";
+    }).join("") || '<div class="empty">Go back and pick some order lines first.</div>';
+    // Re-apply each line's current box after the options exist.
+    Array.prototype.forEach.call($("mk-alloc").querySelectorAll(".allocrow"), function (row) {
+      var p = picked[row.getAttribute("data-key")];
+      if (!p) return;
+      if (p.box > n) p.box = n;
+      row.querySelector("select").value = String(p.box || 1);
+    });
+    drawBoxes();
+  }
+
+  function drawBoxes() {
+    var n = boxCount(), out = "";
+    for (var i = 1; i <= n; i++) {
+      var inside = chosen().filter(function (p) { return (p.box || 1) === i; });
+      var qty = inside.reduce(function (a, p) { return a + p.qty; }, 0);
+      out += '<div class="boxcard' + (inside.length ? "" : " void") + '"><h4>Box ' + i +
+        " <em>" + qty + " units</em></h4>" +
+        (inside.length
+          ? "<ul>" + inside.map(function (p) {
+              return "<li>" + esc(p.line.product || "(no product name)") + " × " + p.qty + "</li>";
+            }).join("") + "</ul>"
+          : '<div style="font-size:12.5px">Empty — nothing assigned</div>') + "</div>";
+    }
+    $("mk-boxgrid").innerHTML = out;
+  }
+
+  // Where the rows land: the board of the first picked order line, or the one
+  // chosen on the details step when every line was typed by hand.
+  function target() {
+    var fromLine = chosen().filter(function (p) { return p.line.sheet_token; })[0];
+    if (fromLine) return {token: fromLine.line.sheet_token, tab: fromLine.line.tab};
+    var parts = ($("mk-f-board").value || "").split("|");
+    return {token: parts[0] || "", tab: parts[1] || ""};
+  }
+
+  // ------------------------------------------------------------ payload
+  function payload(dry) {
+    return {
+      dry_run: !!dry,
+      sheet_token: target().token,
+      tab: target().tab,
+      client: $("mk-f-client").value.trim(),
+      carrier: $("mk-f-carrier").value.trim(),
+      tracking: $("mk-f-tracking").value.trim(),
+      po_ref: $("mk-f-po").value.trim(),
+      invoice_num: $("mk-f-invoice").value.trim(),
+      ddp: $("mk-f-ddp").value.trim(),
+      ship_date: $("mk-f-date").value.trim(),
+      ship_to_name: $("mk-f-toname").value.trim(),
+      ship_to: $("mk-f-shipto").value.trim(),
+      notes: $("mk-f-notes").value.trim(),
+      boxes: boxCount(),
+      lines: chosen().map(function (p) {
+        return {
+          key: p.line.key, product: p.line.product, photo: p.line.photo,
+          order_num: p.line.order_num, ordered: p.line.ordered || p.qty,
+          client: p.line.client,
+          qty: p.qty, box: p.box || 1
+        };
+      })
+    };
+  }
+
+  function review() {
+    $("mk-problems").innerHTML = '<div class="probs"><b>Checking…</b></div>';
+    $("mk-review").innerHTML = "";
+    fetch(apiBase() + "/shipments", {
+      method: "POST", headers: postHeaders(), body: JSON.stringify(payload(true))
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      var probs = d.problems || [];
+      $("mk-problems").innerHTML = probs.length
+        ? '<div class="probs bad"><b>' + probs.length + " thing" + (probs.length > 1 ? "s" : "") +
+          " to fix before this can be created</b><ul>" +
+          probs.map(function (p) { return "<li>" + esc(p) + "</li>"; }).join("") + "</ul></div>"
+        : '<div class="probs good"><b>Ready to create.</b> ' + (d.preview || []).length +
+          " rows will be added starting at row " + d.start_row + ".</div>";
+      if ((d.unmapped_columns || []).length) {
+        $("mk-problems").innerHTML +=
+          '<div class="probs"><b>These fields have no column on that sheet yet</b>' +
+          "<ul><li>" + d.unmapped_columns.map(function (c) {
+            return esc(COLUMN_LABELS[c] || c);
+          }).join("</li><li>") + "</li></ul>" +
+          "They won't be saved, and the packing list will flag them. Add the columns and " +
+          "point the matching env vars at them to fix it for good.</div>";
+      }
+      $("mk-review").innerHTML =
+        "<table><thead><tr><th>Sheet row</th><th>Box</th><th>Item</th>" +
+        "<th>Qty</th><th>Tracking</th></tr></thead><tbody>" +
+        (d.preview || []).map(function (p) {
+          return "<tr><td>" + p.row + "</td><td>Box " + p.box + "</td><td>" +
+            esc(p.product || "(no product name)") + "</td><td>" + p.qty + '</td><td class="mono">' +
+            esc(p.tracking || "↳") + "</td></tr>";
+        }).join("") + "</tbody></table>";
+      $("mk-next").disabled = probs.length > 0;
+    }).catch(function (e) {
+      $("mk-problems").innerHTML = '<div class="probs bad"><b>Could not check this shipment</b>' +
+        esc(String(e)) + "</div>";
+    });
+  }
+
+  function create() {
+    $("mk-next").disabled = true;
+    $("mk-next").textContent = "Creating…";
+    fetch(apiBase() + "/shipments", {
+      method: "POST", headers: postHeaders(), body: JSON.stringify(payload(false))
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (!d.ok) throw new Error(d.error || "unknown error");
+      $("mk-done-s").textContent = d.rows + " lines across " + d.boxes + " box" +
+        (d.boxes > 1 ? "es" : "") + " written to " + d.tab + ", tracking " + d.tracking + ".";
+      $("mk-done-pl").href = d.packing_list + "&t=" + encodeURIComponent(token());
+      go(4);
+      if (window.__shipbotReload) window.__shipbotReload();
+    }).catch(function (e) {
+      $("mk-problems").innerHTML = '<div class="probs bad"><b>Could not create the shipment</b>' +
+        esc(String(e.message || e)) + "</div>";
+      go(3);
+    }).finally(function () {
+      $("mk-next").disabled = false;
+      $("mk-next").textContent = "Next";
+    });
+  }
+
+  // -------------------------------------------------------------- steps
+  function go(n) {
+    step = n;
+    Array.prototype.forEach.call(mk.querySelectorAll(".pane"), function (p) {
+      p.classList.toggle("on", Number(p.getAttribute("data-pane")) === n);
+    });
+    Array.prototype.forEach.call(mk.querySelectorAll(".step"), function (s) {
+      var i = Number(s.getAttribute("data-step"));
+      s.classList.toggle("on", i === n);
+      s.classList.toggle("done", i < n);
+    });
+    $("mk-back").hidden = n === 0 || n === 4;
+    $("mk-next").hidden = n === 4;
+    $("mk-next").disabled = false;
+    $("mk-next").textContent = n === 3 ? "Create shipment" : "Next";
+    if (n === 1) drawAlloc();
+    if (n === 2) prefill();
+    if (n === 3) review();
+    tally();
+  }
+
+  function prefill() {
+    // Which sheet a shipment lands on normally comes from the order line it
+    // came from. A hand-typed shipment has no line, so the board becomes a
+    // question rather than an assumption.
+    var fromLine = chosen().filter(function (p) { return p.line.sheet_token; })[0];
+    var wrap = $("mk-board-wrap");
+    wrap.hidden = !!fromLine;
+    if (!fromLine) {
+      var sel = $("mk-f-board"), prev = sel.value;
+      sel.innerHTML = boardList.map(function (b) {
+        return '<option value="' + esc(b.token + "|" + b.board) + '">' +
+          esc(b.board) + "</option>";
+      }).join("");
+      if (prev) sel.value = prev;
+    }
+    var first = chosen()[0];
+    if (first && !$("mk-f-client").value) $("mk-f-client").value = first.line.client || "";
+    if (first && !$("mk-f-po").value) $("mk-f-po").value = first.line.order_num || "";
+    if (!$("mk-f-date").value) $("mk-f-date").value = new Date().toISOString().slice(0, 10);
+  }
+
+  function tally() {
+    var n = chosen().length;
+    $("mk-tally").innerHTML = n
+      ? "<b>" + n + "</b> line" + (n > 1 ? "s" : "") + " · <b>" + units() + "</b> units · <b>" +
+        boxCount() + "</b> box" + (boxCount() > 1 ? "es" : "")
+      : "Nothing selected yet";
+  }
+
+  // ------------------------------------------------------------- events
+  document.addEventListener("click", function (ev) {
+    var t = ev.target;
+    if (t.closest && t.closest("[data-mk=close]")) { close(); return; }
+    if (t.id === "mk-open" || (t.closest && t.closest("#mk-open"))) { open(); return; }
+    if (!mk.classList.contains("on")) return;
+
+    var chip = t.closest && t.closest(".bchip");
+    if (chip) { board = chip.getAttribute("data-board"); drawBoards(); drawOrders(); return; }
+
+    var stepBtn = t.closest && t.closest(".step");
+    if (stepBtn) { go(Number(stepBtn.getAttribute("data-step"))); return; }
+
+    if (t.id === "mk-reload") { orders = []; loadOrders(true); return; }
+    if (t.id === "mk-manual") { addManual(); return; }
+    if (t.classList && t.classList.contains("drop")) {
+      var row = t.closest("[data-man]");
+      if (row) {
+        var key = row.getAttribute("data-man");
+        manual = manual.filter(function (m) { return m.line.key !== key; });
+        drawManual(); tally();
+      }
+      return;
+    }
+    if (t.id === "mk-back") { go(Math.max(0, step - 1)); return; }
+    if (t.id === "mk-next") { step === 3 ? create() : go(Math.min(3, step + 1)); return; }
+    if (t.id === "mk-done-again") {
+      picked = Object.create(null);
+      manual = []; drawManual();
+      ["mk-f-tracking", "mk-f-invoice", "mk-f-notes"].forEach(function (i) { $(i).value = ""; });
+      $("mk-boxes").value = 1;
+      orders = []; loadOrders(true); go(0); return;
+    }
+    if (t.id === "mk-spread") {
+      var n = boxCount(), i = 0;
+      chosen().forEach(function (p) { p.box = (i++ % n) + 1; });
+      drawAlloc(); return;
+    }
+    if (t.id === "mk-allone") {
+      chosen().forEach(function (p) { p.box = 1; });
+      drawAlloc(); return;
+    }
+  });
+
+  mk.addEventListener("change", function (ev) {
+    var t = ev.target;
+    var row = t.closest && t.closest("tr[data-key]");
+    if (row && t.type === "checkbox") {
+      var key = row.getAttribute("data-key");
+      var line = orders.filter(function (o) { return o.key === key; })[0];
+      if (t.checked && line) picked[key] = { line: line, qty: line.remaining, box: 1 };
+      else delete picked[key];
+      drawOrders();
+      return;
+    }
+    if (row && t.classList.contains("qin")) {
+      var p = picked[row.getAttribute("data-key")];
+      if (p) p.qty = Math.max(0, parseInt(t.value, 10) || 0);
+      tally();
+      return;
+    }
+    var alloc = t.closest && t.closest(".allocrow");
+    if (alloc) {
+      var q = picked[alloc.getAttribute("data-key")];
+      if (q) q.box = parseInt(t.value, 10) || 1;
+      drawBoxes();
+      return;
+    }
+    var man = t.closest && t.closest("[data-man]");
+    if (man) {
+      var m = manual.filter(function (x) {
+        return x.line.key === man.getAttribute("data-man");
+      })[0];
+      if (m) {
+        if (t.classList.contains("m-so")) m.line.order_num = t.value.trim();
+        if (t.classList.contains("m-prod")) m.line.product = t.value.trim();
+        if (t.classList.contains("m-client")) m.line.client = t.value.trim();
+        if (t.classList.contains("m-qty")) m.qty = Math.max(0, parseInt(t.value, 10) || 0);
+      }
+      tally();
+      return;
+    }
+    if (t.id === "mk-boxes") { drawAlloc(); tally(); return; }
+    if (t.id === "mk-client") { drawOrders(); return; }
+  });
+
+  mk.addEventListener("input", function (ev) {
+    if (ev.target.id === "mk-q") drawOrders();
+  });
+
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape" && mk.classList.contains("on")) close();
+  });
+})();
+</script>
+
+</body>
+</html>
