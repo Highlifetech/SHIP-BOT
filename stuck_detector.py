@@ -82,7 +82,13 @@ REASON_LABELS = {
     "CUSTOMS_HOLD": ("[CUSTOMS]", "Possible customs hold"),
     "STUCK_NO_SCAN": ("[STUCK]", "No movement / no new scan"),
     "NO_LOCATION_CHANGE": ("[STALLED]", "Same location, not progressing"),
+    "LABEL_NEVER_SCANNED": ("[NOT PICKED UP]", "Label created, never scanned"),
 }
+
+# A label whose own ETA is this many days in the past and which the carrier
+# has still never scanned is escalated: the parcel was probably never handed
+# over. Kept low on purpose -- catching it on day one is the whole point.
+OVERDUE_LABEL_DAYS = float(os.environ.get("OVERDUE_LABEL_DAYS", "1"))
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +185,27 @@ def _is_pre_scan(result):
     return any(kw in raw for kw in PRE_SCAN_KEYWORDS)
 
 
+def _label_overdue_days(result, now=None):
+    """Days past its own ETA an unscanned label is; 0 when it isn't one."""
+    status = (result.get("new_status") or "").strip()
+    if status == DELIVERED:
+        return 0.0
+    if not (_is_pre_scan(result) or status == "Label Created/Not Scanned"):
+        return 0.0
+    if (result.get("location") or "").strip():
+        return 0.0            # it has moved -- the stall logic owns it
+
+    raw_eta = str(result.get("delivery_date") or "").strip()[:10]
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m-%d-%Y"):
+        try:
+            eta = datetime.strptime(raw_eta, fmt).date()
+        except (ValueError, TypeError):
+            continue
+        today = (now or _now()).date()
+        return max(0.0, float((today - eta).days))
+    return 0.0
+
+
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 
@@ -237,15 +264,22 @@ def _ai_customs_summary(customs_alerts):
 
 
 
+def _one_line(value):
+    """'Adam Korsunsky' over 'Brick City' -> 'Brick City' (company, not contact)."""
+    parts = [p.strip() for p in str(value or "").splitlines() if p.strip()]
+    return parts[-1] if parts else ""
+
+
 def _display_name(result):
-    """Mirror LarkClient._shipment_line naming so alerts read consistently."""
-    recipient = (result.get("recipient") or "").strip()
-    customer = (result.get("customer") or "").strip()
+    """Mirror the card's naming so alerts read consistently."""
+    recipient = _one_line(result.get("recipient"))
+    customer = _one_line(result.get("customer"))
     if recipient.upper() == "BRENDAN":
         return "Brendan"
     if recipient.upper() == "CUSTOMER DIRECT":
         return customer or "Unknown"
-    return customer or recipient or "Unknown"
+    name = customer or recipient
+    return name or (result.get("shipment_id") or "").strip() or "Unknown"
 
 
 def _dedupe(all_results):
@@ -293,6 +327,10 @@ def _evaluate(result, entry, now):
                  and days_unchanged > NO_MOVE_DAYS)
     escalated = same_spot and days_unchanged >= STUCK_ESCALATE_DAYS
 
+    # A label that is past its own ETA and has never been scanned means the
+    # parcel most likely never left the building. Escalate on day one.
+    overdue_label = _label_overdue_days(result, now)
+
     stage = 0
     reason = None
     if customs:
@@ -301,6 +339,11 @@ def _evaluate(result, entry, now):
         stage, reason = 3, "NO_LOCATION_CHANGE"
     elif same_spot:
         stage, reason = 2, "NO_LOCATION_CHANGE"
+    elif overdue_label >= OVERDUE_LABEL_DAYS:
+        # Re-alerts once when a day-old miss becomes a week-old one.
+        stage = 3 if overdue_label >= OVERDUE_LABEL_DAYS * 5 else 2
+        reason = "LABEL_NEVER_SCANNED"
+        days_unchanged = max(days_unchanged, overdue_label)
 
     return stage, reason, days_unchanged
 
@@ -319,8 +362,10 @@ def detect(all_results, state, now=None):
     for tn, result in _dedupe(all_results).items():
         seen_tns.add(tn)
 
-        if not _has_real_scan_data(result):
+        if not _has_real_scan_data(result) and not _label_overdue_days(result, now):
             # Can't see this shipment -- drop any stale state, stay quiet.
+            # An overdue never-scanned label is the exception: the absence of
+            # data past its own ETA is exactly the signal.
             state.pop(tn, None)
             continue
 
@@ -404,7 +449,8 @@ def build_message(alerts):
         lines.append(_summary)
 
     # Group by reason for readability.
-    order = ["CUSTOMS_HOLD", "STUCK_NO_SCAN", "NO_LOCATION_CHANGE"]
+    order = ["CUSTOMS_HOLD", "LABEL_NEVER_SCANNED", "STUCK_NO_SCAN",
+             "NO_LOCATION_CHANGE"]
     by_reason = {}
     for a in alerts:
         by_reason.setdefault(a["reason"], []).append(a)
@@ -434,7 +480,9 @@ def build_message(alerts):
                 bits.append(raw)
             if loc:
                 bits.append("@ " + loc)
-            if reason in ("STUCK_NO_SCAN", "NO_LOCATION_CHANGE") and days:
+            if reason == "LABEL_NEVER_SCANNED" and days:
+                bits.append("%.0f day(s) past its ETA, never scanned" % days)
+            elif reason in ("STUCK_NO_SCAN", "NO_LOCATION_CHANGE") and days:
                 bits.append("no change for %.0f day(s)" % days)
             if a.get("stage") == 3:
                 bits.append("STILL STUCK")

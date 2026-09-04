@@ -1,0 +1,653 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shipment Tracker — Off Menu</title>
+<style>
+:root{
+  --bg:#f5f6f8; --surface:#fff; --sunken:#fafbfc;
+  --ink:#101318; --ink-2:#4a525e; --ink-3:#8b929e;
+  --line:#e6e8ec; --line-2:#eff1f4;
+  --blue:#2563eb; --blue-soft:#eef3ff;
+  --red:#dc2626; --red-soft:#fdeeee;
+  --amber:#e08700; --amber-soft:#fdf4e3;
+  --green:#15803d; --green-soft:#eaf6ee;
+  --grey:#9aa1ad; --grey-soft:#f2f3f5;
+  --radius:14px; --shadow:0 1px 2px rgba(16,19,24,.05),0 1px 3px rgba(16,19,24,.04);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme=light]){
+    --bg:#0e1013; --surface:#171a1f; --sunken:#1c2026;
+    --ink:#e9ebee; --ink-2:#a8b0bc; --ink-3:#79808c;
+    --line:#272b32; --line-2:#22262c;
+    --blue:#5b8cff; --blue-soft:#182238;
+    --red:#f27272; --red-soft:#2e1c1d;
+    --amber:#e0a33d; --amber-soft:#2c2417;
+    --green:#5cbe80; --green-soft:#16281d;
+    --grey:#7b828e; --grey-soft:#1f232a;
+    --shadow:0 1px 2px rgba(0,0,0,.4);
+  }
+}
+:root[data-theme=dark]{
+  --bg:#0e1013; --surface:#171a1f; --sunken:#1c2026;
+  --ink:#e9ebee; --ink-2:#a8b0bc; --ink-3:#79808c;
+  --line:#272b32; --line-2:#22262c;
+  --blue:#5b8cff; --blue-soft:#182238;
+  --red:#f27272; --red-soft:#2e1c1d;
+  --amber:#e0a33d; --amber-soft:#2c2417;
+  --green:#5cbe80; --green-soft:#16281d;
+  --grey:#7b828e; --grey-soft:#1f232a;
+  --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  background:var(--bg); color:var(--ink);
+  font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased; padding:22px 18px 64px;
+}
+.wrap{max-width:1180px;margin:0 auto}
+a{color:inherit}
+
+/* ---------- header ---------- */
+.topbar{display:flex;align-items:flex-start;gap:16px;margin-bottom:18px;flex-wrap:wrap}
+.brand{display:flex;gap:13px;align-items:center;flex:1 1 320px;min-width:0}
+.logo{width:42px;height:42px;border-radius:11px;background:var(--blue);color:#fff;display:grid;place-items:center;flex:none}
+.logo svg{width:22px;height:22px}
+h1{font-size:23px;line-height:1.2;margin:0;letter-spacing:-.02em;font-weight:680}
+.sub{color:var(--ink-3);font-size:13px;margin-top:2px}
+.updated{text-align:right;color:var(--ink-3);font-size:12px;line-height:1.35}
+.updated b{display:block;color:var(--ink-2);font-weight:560}
+
+/* ---------- buttons ---------- */
+.btn{
+  display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);
+  background:var(--surface);color:var(--ink);border-radius:9px;padding:8px 14px;
+  font:inherit;font-size:13px;font-weight:550;cursor:pointer;white-space:nowrap;
+  transition:background .12s,border-color .12s;
+}
+.btn:hover{background:var(--sunken)}
+.btn.sm{padding:5px 11px;font-size:12.5px;border-radius:7px}
+.btn.attn{color:var(--red);background:var(--red-soft);border-color:transparent}
+.btn.attn:hover{filter:brightness(.97)}
+.btn svg{width:14px;height:14px;flex:none}
+.btn[disabled]{opacity:.5;cursor:default}
+
+/* ---------- kpi tiles ---------- */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(178px,1fr));gap:12px;margin-bottom:18px}
+.kpi{
+  border-radius:var(--radius);padding:15px 16px;border:1px solid transparent;
+  background:var(--surface);box-shadow:var(--shadow);cursor:pointer;text-align:left;
+  font:inherit;color:inherit;transition:transform .1s,box-shadow .12s;
+}
+.kpi:hover{transform:translateY(-1px);box-shadow:0 3px 10px rgba(16,19,24,.09)}
+.kpi[aria-pressed=true]{outline:2px solid var(--blue);outline-offset:1px}
+.kpi .top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.kpi .n{font-size:29px;font-weight:700;letter-spacing:-.03em;line-height:1}
+.kpi .ico{width:24px;height:24px;display:grid;place-items:center;opacity:.85}
+.kpi .ico svg{width:19px;height:19px}
+.kpi .lbl{display:flex;align-items:center;gap:7px;margin-top:11px;font-weight:600;font-size:13.5px}
+.kpi .hint{color:var(--ink-3);font-size:12px;margin-top:2px}
+.kpi.k-red{background:var(--red-soft)} .kpi.k-red .n{color:var(--red)}
+.kpi.k-amber{background:var(--amber-soft)} .kpi.k-amber .n{color:var(--amber)}
+.kpi.k-blue{background:var(--blue-soft)} .kpi.k-blue .n{color:var(--blue)}
+.kpi.k-grey{background:var(--surface)}
+.kpi.k-green{background:var(--green-soft)} .kpi.k-green .n{color:var(--green)}
+
+.dot{width:9px;height:9px;border-radius:50%;flex:none}
+.d-flagged{background:var(--red)} .d-arriving{background:var(--amber)}
+.d-transit{background:var(--blue)} .d-unscanned{background:var(--grey)}
+.d-delivered{background:var(--green)}
+
+/* ---------- filters ---------- */
+.chips{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:12px}
+.chip{
+  display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);
+  background:var(--surface);border-radius:10px;padding:8px 15px;font:inherit;
+  font-size:13.5px;font-weight:550;cursor:pointer;color:var(--ink);
+}
+.chip:hover{background:var(--sunken)}
+.chip[aria-pressed=true]{background:var(--blue);border-color:var(--blue);color:#fff}
+.chip[aria-pressed=true] .dot{box-shadow:0 0 0 2px rgba(255,255,255,.5)}
+.chip .c{opacity:.6;font-variant-numeric:tabular-nums}
+
+.controls{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;align-items:center}
+.field{
+  display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);
+  background:var(--surface);border-radius:10px;padding:0 12px;height:40px;color:var(--ink-2);
+}
+.field svg{width:15px;height:15px;flex:none;opacity:.65}
+.field select,.field input{
+  border:0;background:transparent;font:inherit;font-size:13.5px;color:var(--ink);
+  outline:none;padding:0;height:100%;min-width:0;
+}
+.field select{cursor:pointer;padding-right:4px}
+.field.search{flex:1 1 260px;min-width:200px}
+.field.search input{width:100%}
+.field.search input::placeholder{color:var(--ink-3)}
+
+/* ---------- groups ---------- */
+.group{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+  box-shadow:var(--shadow);margin-bottom:14px;overflow:hidden}
+.ghead{display:flex;align-items:center;gap:13px;padding:14px 16px;cursor:pointer;user-select:none}
+.ghead:hover{background:var(--sunken)}
+.caret{width:16px;height:16px;flex:none;color:var(--ink-3);transition:transform .15s}
+.group.collapsed .caret{transform:rotate(-90deg)}
+.avatar{width:38px;height:38px;border-radius:10px;flex:none;display:grid;place-items:center;
+  font-size:12px;font-weight:700;letter-spacing:-.02em;background:var(--ink);color:var(--surface)}
+.gmeta{flex:1;min-width:0}
+.gname{font-weight:640;font-size:15px;letter-spacing:-.01em}
+.gsub{color:var(--ink-3);font-size:12.5px;margin-top:1px;display:flex;gap:9px;flex-wrap:wrap}
+.gsub span{white-space:nowrap}
+.gsub .sep{opacity:.45}
+.group.collapsed .rows{display:none}
+
+.rows{border-top:1px solid var(--line-2)}
+.row{display:grid;grid-template-columns:20px 132px minmax(180px,1.5fr) 74px 84px 96px 150px auto;
+  gap:14px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line-2)}
+.row:last-child{border-bottom:0}
+.row:hover{background:var(--sunken)}
+.sid{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;font-weight:600;letter-spacing:-.02em}
+.what{min-width:0}
+.what .t{font-weight:520;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.what .trk{color:var(--ink-3);font-size:12px;font-family:ui-monospace,Menlo,monospace;margin-top:1px}
+.carrier{font-size:12.5px;font-weight:640;color:var(--ink-2)}
+.boxes{font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.eta .k,.upd .k{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.eta .v{font-weight:620;font-size:13px}
+.eta .v.today{color:var(--green)} .eta .v.unknown{color:var(--red)} .eta .v.late{color:var(--red)}
+.upd{font-size:12.5px;color:var(--ink-2)}
+.upd .loc{color:var(--ink-3);font-size:12px}
+.acts{display:flex;gap:7px;justify-content:flex-end;flex-wrap:wrap}
+.more{padding:11px 16px;font-size:13px;color:var(--blue);cursor:pointer;font-weight:550;background:none;border:0;font-family:inherit}
+.more:hover{text-decoration:underline}
+
+/* ---------- footer strip ---------- */
+.strip{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+  box-shadow:var(--shadow);padding:15px 17px;margin-top:18px}
+.strip h2{font-size:14px;margin:0 0 12px;display:flex;align-items:center;gap:8px;font-weight:620}
+.strip h2 svg{width:15px;height:15px;opacity:.6}
+.deltas{display:flex;gap:26px;flex-wrap:wrap}
+.delta{display:flex;align-items:center;gap:9px}
+.delta .n{font-size:20px;font-weight:700;letter-spacing:-.02em}
+.delta .l{font-size:13px;color:var(--ink-2)}
+.quick{display:flex;gap:9px;flex-wrap:wrap;margin-top:18px}
+
+.empty{background:var(--surface);border:1px dashed var(--line);border-radius:var(--radius);
+  padding:46px 20px;text-align:center;color:var(--ink-3)}
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(10px);
+  background:var(--ink);color:var(--bg);padding:11px 19px;border-radius:10px;font-size:13.5px;
+  font-weight:550;opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;z-index:50}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+.spin{animation:sp 1s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (max-width:980px){
+  .row{grid-template-columns:20px 1fr;gap:6px 12px}
+  .row>*{grid-column:2}
+  .row .stat{grid-column:1;grid-row:1}
+  .acts{justify-content:flex-start;margin-top:4px}
+  .eta,.upd{display:flex;gap:8px;align-items:baseline}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="topbar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 8v8a2 2 0 0 1-1 1.7l-7 4a2 2 0 0 1-2 0l-7-4A2 2 0 0 1 3 16V8a2 2 0 0 1 1-1.7l7-4a2 2 0 0 1 2 0l7 4A2 2 0 0 1 21 8z"/>
+          <path d="m3.3 7 8.7 5 8.7-5M12 22V12"/>
+        </svg>
+      </div>
+      <div>
+        <h1>Shipment Tracker</h1>
+        <div class="sub" id="subtitle">All active shipments across Off Menu</div>
+      </div>
+    </div>
+    <div class="updated">
+      <span>Last updated</span>
+      <b id="updated">—</b>
+    </div>
+    <button class="btn" id="refresh">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6"/>
+      </svg>
+      Refresh
+    </button>
+  </div>
+
+  <div class="kpis" id="kpis"></div>
+  <div class="chips" id="chips"></div>
+
+  <div class="controls">
+    <label class="field">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 21V7l9-4 9 4v14M9 21v-6h6v6"/></svg>
+      <select id="f-client"><option value="">All clients</option></select>
+    </label>
+    <label class="field">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg>
+      <select id="f-owner"><option value="">All owners</option></select>
+    </label>
+    <label class="field">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M2 7h11v9H2zM13 10h4l4 3v3h-8z"/><circle cx="6" cy="18" r="1.8"/><circle cx="17" cy="18" r="1.8"/></svg>
+      <select id="f-carrier"><option value="">All carriers</option></select>
+    </label>
+    <label class="field search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" type="search" placeholder="Search SO, tracking #, client, or location…" autocomplete="off">
+    </label>
+    <label class="field">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+      <select id="groupby">
+        <option value="client">Group by client</option>
+        <option value="owner">Group by owner</option>
+        <option value="carrier">Group by carrier</option>
+        <option value="none">No grouping</option>
+      </select>
+    </label>
+    <label class="field">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M7 4v16m0 0-3-3m3 3 3-3M17 20V4m0 0-3 3m3-3 3 3"/></svg>
+      <select id="sort">
+        <option value="urgency">Most urgent</option>
+        <option value="eta">Soonest ETA</option>
+        <option value="recent">Most recent update</option>
+        <option value="client">Client A–Z</option>
+      </select>
+    </label>
+  </div>
+
+  <div id="groups"></div>
+
+  <div class="strip" id="strip" hidden>
+    <h2>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+      <span id="strip-title">Needs a decision</span>
+    </h2>
+    <div class="deltas" id="deltas"></div>
+  </div>
+
+  <div class="quick">
+    <button class="btn" data-quick="flagged">Show flagged</button>
+    <button class="btn" data-quick="today">Arriving today</button>
+    <button class="btn" data-quick="unscanned">Never scanned</button>
+    <button class="btn" data-quick="clear">Clear filters</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var STATUS = {
+    flagged:   {label: "Needs attention", hint: "Shipments require action", cls: "k-red",   icon: "alert"},
+    arriving:  {label: "Out for delivery", hint: "Arriving today",          cls: "k-amber", icon: "truck"},
+    transit:   {label: "In transit",       hint: "On the way",              cls: "k-blue",  icon: "plane"},
+    unscanned: {label: "Not scanned",      hint: "Label created",           cls: "k-grey",  icon: "doc"},
+    delivered: {label: "Delivered",        hint: "Closed out",              cls: "k-green", icon: "check"}
+  };
+  var ORDER = ["flagged", "arriving", "transit", "unscanned"];
+  var ICONS = {
+    alert: '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.2v.1"/>',
+    truck: '<path d="M2 7h11v9H2zM13 10h4l4 3v3h-8z"/><circle cx="6" cy="18" r="1.8"/><circle cx="17" cy="18" r="1.8"/>',
+    plane: '<path d="M2 13.5 21 4l-5 9.5 5 6.5-8-3-4 3-1-5z"/>',
+    doc:   '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
+    check: '<circle cx="12" cy="12" r="9"/><path d="m8.5 12.2 2.4 2.4 4.6-4.8"/>'
+  };
+
+  var state = {
+    data: {shipments: [], totals: {}, owners: [], clients: [], carriers: []},
+    status: "all", client: "", owner: "", carrier: "", q: "", sort: "urgency",
+    groupby: "client",
+    collapsed: {}, expanded: {}, busy: false
+  };
+
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c];
+    });
+  };
+  function svg(path, w) {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="' +
+      (w || 1.9) + '" stroke-linecap="round" stroke-linejoin="round">' + path + "</svg>";
+  }
+  function toast(msg) {
+    var t = $("toast");
+    t.textContent = msg; t.classList.add("on");
+    clearTimeout(t._t); t._t = setTimeout(function () { t.classList.remove("on"); }, 2600);
+  }
+  function initials(name) {
+    var w = String(name || "?").replace(/[^A-Za-z0-9 ]/g, " ").trim().split(/\s+/);
+    if (!w[0]) return "?";
+    return (w.length > 1 ? w[0][0] + w[1][0] : w[0].slice(0, 2)).toUpperCase();
+  }
+  function hue(name) {
+    var h = 0, s = String(name || "");
+    for (var i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) % 360; }
+    return h;
+  }
+
+  // ---------- filtering ----------
+  function visible() {
+    var q = state.q.trim().toLowerCase();
+    return state.data.shipments.filter(function (s) {
+      if (state.status !== "all" && s.status !== state.status) return false;
+      if (state.client && s.client !== state.client) return false;
+      if (state.owner && s.owner !== state.owner) return false;
+      if (state.carrier && s.carrier !== state.carrier) return false;
+      if (q) {
+        var hay = [s.id, s.tracking, s.client, s.owner, s.carrier, s.detail,
+                   s.location, s.eta_label].join(" ").toLowerCase();
+        if (hay.indexOf(q) === -1) return false;
+      }
+      return true;
+    });
+  }
+
+  var RANK = {flagged: 0, arriving: 1, transit: 2, unscanned: 3, delivered: 4};
+  function sortRows(rows) {
+    var by = state.sort;
+    return rows.slice().sort(function (a, b) {
+      if (by === "client") return a.client.localeCompare(b.client) || a.id.localeCompare(b.id);
+      if (by === "eta") {
+        var ea = a.eta || "9999", eb = b.eta || "9999";
+        return ea < eb ? -1 : ea > eb ? 1 : a.id.localeCompare(b.id);
+      }
+      if (by === "recent") {
+        var ra = a.eta || "", rb = b.eta || "";
+        return rb.localeCompare(ra) || a.id.localeCompare(b.id);
+      }
+      return (RANK[a.status] - RANK[b.status]) ||
+             (b.overdue_days - a.overdue_days) ||
+             a.id.localeCompare(b.id);
+    });
+  }
+
+  // ---------- render ----------
+  function renderKpis() {
+    var t = state.data.totals || {};
+    var counts = {
+      flagged: t.flagged || 0, arriving: t.arriving || 0, transit: t.transit || 0,
+      unscanned: t.unscanned || 0, delivered: t.delivered || 0
+    };
+    var keys = ORDER.concat(["delivered"]);
+    $("kpis").innerHTML = keys.map(function (k) {
+      var m = STATUS[k], active = state.status === k;
+      var isFilter = k !== "delivered";
+      return '<' + (isFilter ? "button" : "div") + ' class="kpi ' + m.cls + '"' +
+        (isFilter ? ' data-status="' + k + '" aria-pressed="' + active + '"'
+                  : ' style="cursor:default"') + ">" +
+        '<div class="top"><div class="n">' + counts[k] + '</div>' +
+        '<div class="ico">' + svg(ICONS[m.icon]) + "</div></div>" +
+        '<div class="lbl"><span class="dot d-' + k + '"></span>' + m.label + "</div>" +
+        '<div class="hint">' + m.hint + "</div></" + (isFilter ? "button" : "div") + ">";
+    }).join("");
+  }
+
+  function renderChips() {
+    var all = state.data.shipments.length;
+    var per = {};
+    state.data.shipments.forEach(function (s) { per[s.status] = (per[s.status] || 0) + 1; });
+    var html = ['<button class="chip" data-status="all" aria-pressed="' +
+      (state.status === "all") + '">All shipments <span class="c">' + all + "</span></button>"];
+    ORDER.forEach(function (k) {
+      html.push('<button class="chip" data-status="' + k + '" aria-pressed="' +
+        (state.status === k) + '"><span class="dot d-' + k + '"></span>' +
+        STATUS[k].label + ' <span class="c">' + (per[k] || 0) + "</span></button>");
+    });
+    $("chips").innerHTML = html.join("");
+  }
+
+  function fillSelect(el, values, current, allLabel) {
+    el.innerHTML = '<option value="">' + allLabel + "</option>" +
+      values.map(function (v) {
+        return '<option value="' + esc(v) + '"' + (v === current ? " selected" : "") +
+          ">" + esc(v) + "</option>";
+      }).join("");
+  }
+
+  function rowHtml(s) {
+    var etaCls = s.overdue_days ? "late"
+      : s.eta_label === "Today" ? "today"
+      : s.eta_label === "Unknown" ? "unknown" : "";
+    var etaText = s.overdue_days ? s.eta_label + " · " + s.overdue_days + "d late" : s.eta_label;
+    var track = s.track_url
+      ? '<a class="btn sm" href="' + esc(s.track_url) + '" target="_blank" rel="noopener">Track</a>'
+      : '<span class="btn sm" style="opacity:.45">No link</span>';
+    var second = s.status === "flagged"
+      ? '<button class="btn sm attn" data-act="deliver" data-handle="' + esc(s.handle) + '">Mark delivered</button>'
+      : '<button class="btn sm" data-act="deliver" data-handle="' + esc(s.handle) + '">Mark delivered</button>';
+
+    return '<div class="row">' +
+      '<span class="stat dot d-' + s.status + '" title="' + esc(s.status_label) + '"></span>' +
+      '<div class="sid">' + esc(s.id) + "</div>" +
+      '<div class="what"><div class="t">' + esc(s.detail) + "</div>" +
+        (s.tracking ? '<div class="trk">' + esc(s.tracking) + "</div>" : "") + "</div>" +
+      '<div class="carrier">' + esc(s.carrier) + "</div>" +
+      '<div class="boxes">' + (s.boxes ? s.boxes + " boxes" : "—") + "</div>" +
+      '<div class="eta"><div class="k">ETA</div><div class="v ' + etaCls + '">' + esc(etaText) + "</div></div>" +
+      '<div class="upd"><div class="k">Where</div>' +
+        '<div class="loc">' + esc(s.location || "—") + "</div></div>" +
+      '<div class="acts">' + track + second + "</div>" +
+    "</div>";
+  }
+
+  function renderGroups() {
+    var rows = sortRows(visible());
+    var host = $("groups");
+    if (!rows.length) {
+      host.innerHTML = '<div class="empty">Nothing matches those filters.</div>';
+      return;
+    }
+    var key = state.groupby;
+    if (key === "none") {
+      host.innerHTML = '<section class="group"><div class="rows">' +
+        rows.map(rowHtml).join("") + "</div></section>";
+      return;
+    }
+    var by = {};
+    rows.forEach(function (s) {
+      var k = key === "owner" ? s.owner : key === "carrier" ? s.carrier : s.client;
+      (by[k] = by[k] || []).push(s);
+    });
+
+    var names = Object.keys(by).sort(function (a, b) {
+      var fa = by[a].filter(function (s) { return s.status === "flagged"; }).length;
+      var fb = by[b].filter(function (s) { return s.status === "flagged"; }).length;
+      return (fb - fa) || (by[b].length - by[a].length) || a.localeCompare(b);
+    });
+
+    host.innerHTML = names.map(function (name) {
+      var list = by[name];
+      var flagged = list.filter(function (s) { return s.status === "flagged"; }).length;
+      var arriving = list.filter(function (s) { return s.status === "arriving"; }).length;
+      var owners = {};
+      list.forEach(function (s) {
+        owners[key === "owner" ? s.client : s.owner] = 1;
+      });
+      var open = state.expanded[name] ? list.length : Math.min(list.length, 3);
+      var bits = ['<span>' + list.length + " active shipment" + (list.length === 1 ? "" : "s") + "</span>"];
+      if (flagged) bits.push('<span class="sep">|</span><span>' + flagged + " needs attention</span>");
+      if (arriving) bits.push('<span class="sep">|</span><span>' + arriving + " out for delivery</span>");
+      var side = Object.keys(owners).sort();
+      if (side.length) {
+        bits.push('<span class="sep">|</span><span>' +
+          esc(side.slice(0, 3).join(", ") +
+              (side.length > 3 ? " +" + (side.length - 3) : "")) + "</span>");
+      }
+
+      return '<section class="group' + (state.collapsed[name] ? " collapsed" : "") +
+        '" data-client="' + esc(name) + '">' +
+        '<header class="ghead" data-toggle="' + esc(name) + '">' +
+          '<span class="caret">' + svg('<path d="m6 9 6 6 6-6"/>', 2) + "</span>" +
+          '<span class="avatar" style="background:hsl(' + hue(name) + ' 42% 32%)">' +
+            esc(initials(name)) + "</span>" +
+          '<span class="gmeta"><span class="gname">' + esc(name) + "</span>" +
+            '<span class="gsub">' + bits.join("") + "</span></span>" +
+        "</header>" +
+        '<div class="rows">' + list.slice(0, open).map(rowHtml).join("") +
+          (list.length > open
+            ? '<button class="more" data-expand="' + esc(name) + '">+ ' +
+              (list.length - open) + " more shipment" + (list.length - open === 1 ? "" : "s") + "</button>"
+            : "") +
+        "</div></section>";
+    }).join("");
+  }
+
+  function renderStrip() {
+    var s = state.data.shipments;
+    var overdue = s.filter(function (x) { return x.overdue_days > 0; }).length;
+    var noEta = s.filter(function (x) { return !x.eta && x.status !== "unscanned"; }).length;
+    var today = s.filter(function (x) { return x.eta_label === "Today"; }).length;
+    var stuck = s.filter(function (x) { return x.status === "flagged" && !x.overdue_days; }).length;
+    var items = [
+      ["flagged", stuck, "Carrier exceptions"],
+      ["flagged", overdue, "Past ETA, never scanned"],
+      ["arriving", today, "Landing today"],
+      ["unscanned", noEta, "No ETA from carrier"]
+    ];
+    $("deltas").innerHTML = items.map(function (i) {
+      return '<div class="delta"><span class="n">' + i[1] + "</span>" +
+        '<span class="dot d-' + i[0] + '"></span><span class="l">' + i[2] + "</span></div>";
+    }).join("");
+    $("strip").hidden = false;
+  }
+
+  function render() {
+    renderKpis(); renderChips();
+    fillSelect($("f-client"), state.data.clients || [], state.client, "All clients");
+    fillSelect($("f-owner"), state.data.owners || [], state.owner, "All owners");
+    fillSelect($("f-carrier"), state.data.carriers || [], state.carrier, "All carriers");
+    $("sort").value = state.sort;
+    $("groupby").value = state.groupby;
+    $("updated").textContent = state.data.updated_label || "—";
+    var t = state.data.totals || {};
+    $("subtitle").textContent = (t.open || 0) + " open shipments across " +
+      (state.data.sheet_count || 0) + " sheets";
+    renderGroups(); renderStrip();
+  }
+
+  // ---------- data ----------
+  function apiBase() {
+    var p = location.pathname.replace(/\/dashboard\/?$/, "");
+    return p + "/api";
+  }
+  function token() {
+    return new URLSearchParams(location.search).get("t") || "";
+  }
+  function load(force) {
+    if (window.__SHIPBOT_DATA__ && !force) {
+      state.data = window.__SHIPBOT_DATA__; render(); return Promise.resolve();
+    }
+    return fetch(apiBase() + "/shipments?t=" + encodeURIComponent(token()) +
+                 (force ? "&refresh=1" : ""))
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function (d) { state.data = d; render(); })
+      .catch(function (e) {
+        if (window.__SHIPBOT_DATA__) {          // static preview: no API behind it
+          state.data = window.__SHIPBOT_DATA__; render();
+          toast("Preview data — live refresh needs the Railway service");
+          return;
+        }
+        toast("Couldn't load shipments — " + e.message);
+      });
+  }
+
+  function markDelivered(handle, btn) {
+    if (state.busy) return;
+    state.busy = true; btn.disabled = true; btn.textContent = "Saving…";
+    fetch(apiBase() + "/mark-delivered?t=" + encodeURIComponent(token()), {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({handle: handle})
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d && d.ok) {
+          state.data.shipments = state.data.shipments.filter(function (s) {
+            return s.handle !== handle;
+          });
+          var t = state.data.totals;
+          t.open = Math.max(0, (t.open || 1) - 1);
+          t.delivered = (t.delivered || 0) + 1;
+          render(); toast("Marked delivered — written to the sheet");
+        } else {
+          btn.disabled = false; btn.textContent = "Mark delivered";
+          toast((d && d.error) || "Couldn't write to the sheet");
+        }
+      })
+      .catch(function (e) {
+        btn.disabled = false; btn.textContent = "Mark delivered";
+        toast("Couldn't write to the sheet — " + e.message);
+      })
+      .then(function () { state.busy = false; });
+  }
+
+  // ---------- events ----------
+  document.addEventListener("click", function (ev) {
+    var kpi = ev.target.closest("[data-status]");
+    if (kpi) {
+      var v = kpi.getAttribute("data-status");
+      state.status = (state.status === v && v !== "all") ? "all" : v;
+      render(); return;
+    }
+    var head = ev.target.closest("[data-toggle]");
+    if (head) {
+      var n = head.getAttribute("data-toggle");
+      state.collapsed[n] = !state.collapsed[n];
+      head.parentElement.classList.toggle("collapsed"); return;
+    }
+    var more = ev.target.closest("[data-expand]");
+    if (more) { state.expanded[more.getAttribute("data-expand")] = true; renderGroups(); return; }
+
+    var act = ev.target.closest('[data-act="deliver"]');
+    if (act) { markDelivered(act.getAttribute("data-handle"), act); return; }
+
+    var quick = ev.target.closest("[data-quick]");
+    if (quick) {
+      var q = quick.getAttribute("data-quick");
+      if (q === "clear") {
+        state.status = "all"; state.client = ""; state.owner = "";
+        state.carrier = ""; state.q = ""; $("q").value = "";
+      } else if (q === "today") {
+        state.status = "all"; state.q = "today"; $("q").value = "today";
+      } else {
+        state.status = q;
+      }
+      render(); return;
+    }
+  });
+
+  $("f-client").addEventListener("change", function () { state.client = this.value; render(); });
+  $("f-owner").addEventListener("change", function () { state.owner = this.value; render(); });
+  $("f-carrier").addEventListener("change", function () { state.carrier = this.value; render(); });
+  $("sort").addEventListener("change", function () { state.sort = this.value; renderGroups(); });
+  $("groupby").addEventListener("change", function () {
+    state.groupby = this.value; state.expanded = {}; renderGroups();
+  });
+
+  var timer;
+  $("q").addEventListener("input", function () {
+    var v = this.value;
+    clearTimeout(timer);
+    timer = setTimeout(function () { state.q = v; renderGroups(); }, 120);
+  });
+
+  $("refresh").addEventListener("click", function () {
+    var b = this, ico = b.querySelector("svg");
+    if (b.disabled) return;
+    b.disabled = true; ico.classList.add("spin");
+    load(true).then(function () {
+      b.disabled = false; ico.classList.remove("spin"); toast("Refreshed");
+    });
+  });
+
+  load(false);
+})();
+</script>
+</body>
+</html>

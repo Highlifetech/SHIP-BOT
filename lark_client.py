@@ -12,6 +12,7 @@ Boxes are filled only on the first row of a group and carried forward.
 
 import json
 import logging
+import os
 from collections import defaultdict
 from datetime import datetime
 import time
@@ -33,6 +34,38 @@ from config import (
 logger = logging.getLogger(__name__)
 
 PERMANENT_TABS = ["Hannah", "Lucy", "Other"]
+
+# Words that turn up in the tracking column but are not tracking numbers
+# (section labels people type into the sheet).
+TRACKING_JUNK = {
+    "HANNAH", "LUCY", "OTHER", "TBD", "N/A", "NA", "NONE", "PENDING",
+    "TRACKING", "TRACKING#", "NO TRACKING", "SHIPPED", "TOTAL",
+}
+
+
+def clean_tracking(raw):
+    """Normalize a tracking cell, or return '' when it isn't one.
+
+    Sheets pick up stray text ('HANNAH') and typos that glue junk onto the
+    end of a real number ('1ZB87V900424538217(11'). Cut at the first
+    non-alphanumeric character and require something that could plausibly
+    be a tracking number.
+    """
+    value = str(raw or "").strip()
+    if not value or value.upper() in TRACKING_JUNK:
+        return ""
+    cleaned = []
+    for ch in value:
+        if ch.isalnum():
+            cleaned.append(ch)
+        else:
+            break
+    out = "".join(cleaned).upper()
+    if len(out) < 8 or len(out) > 40:
+        return ""
+    if not any(c.isdigit() for c in out):
+        return ""
+    return out
 
 SECTION_DISPLAY = {
     "Hannah": "HANNAH",
@@ -207,7 +240,11 @@ class LarkClient:
                 row.append("")
 
             shipment_id_raw = cell(row, i_shipment)
-            tracking_tokens = cell(row, i_tracking).split(); tracking_raw = tracking_tokens[0] if tracking_tokens else ""
+            tracking_tokens = [t for t in (clean_tracking(t) for t in cell(row, i_tracking).split()) if t]
+            tracking_raw = tracking_tokens[0] if tracking_tokens else ""
+            if cell(row, i_tracking) and not tracking_raw:
+                logger.info("  Row %d: ignoring non-tracking value %r",
+                            start_row + i, cell(row, i_tracking)[:40])
             carrier_raw = cell(row, i_carrier)
             num_boxes_raw = cell(row, i_num_boxes)
 
@@ -673,8 +710,103 @@ class LarkClient:
             return f"- {tracking_display} -- {status_desc}{date_desc}{loc_desc}"
         return f"- {tracking_display} -- {order} -- {name} -- {status_desc}{date_desc}{loc_desc}"
 
+    def mark_delivered(self, spreadsheet_token, tab_title, row_num, when=None):
+        """Manually close out a shipment from the chat card.
+
+        Some carriers never post a final delivery scan (and a few rows are
+        hand-keyed), so the team needs a way to say "this one arrived".
+        Writes the exact dropdown value "Delivered" plus today's date, then
+        recolors the cell -- after this the tracker skips the row entirely.
+        """
+        sheet_id = None
+        for tab in self.get_sheet_metadata(spreadsheet_token):
+            title = (tab.get("title") or "").strip()
+            if title == (tab_title or "").strip() or title.startswith(tab_title or "\0"):
+                sheet_id = tab["sheet_id"]
+                break
+        if not sheet_id:
+            raise Exception("Tab %r not found in %s" % (tab_title, spreadsheet_token))
+
+        cols = columns_for(spreadsheet_token)
+        date_str = (when or datetime.now()).strftime("%Y-%m-%d")
+
+        updates = []
+        if cols.get("status"):
+            updates.append({"row": row_num, "col": cols["status"],
+                            "value": "Delivered"})
+        if cols.get("delivery_date"):
+            updates.append({"row": row_num, "col": cols["delivery_date"],
+                            "value": date_str})
+        if not updates:
+            raise Exception("No status/delivery columns on %s" % spreadsheet_token)
+
+        self.write_cells(spreadsheet_token, sheet_id, updates)
+        try:
+            self.set_status_cell_style(spreadsheet_token, sheet_id, row_num,
+                                       "Delivered")
+        except Exception as e:
+            logger.warning("Could not recolor delivered row %d: %s", row_num, e)
+        logger.info("Marked row %d delivered in %s/%s",
+                    row_num, spreadsheet_token, tab_title)
+        return date_str
+
+    def update_message_card(self, message_id, card):
+        """Replace the card on an already-sent message (used by filter actions)."""
+        url = f"{self.base_url}/open-apis/im/v1/messages/{message_id}"
+        body = {"content": json.dumps(card) if isinstance(card, dict) else card}
+        resp = requests.patch(url, headers=self._headers(), json=body, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("code") != 0:
+            raise Exception("Card update failed: code=%s msg=%s"
+                            % (data.get("code"), data.get("msg")))
+        logger.info("Card message %s updated", message_id)
+
     def send_daily_summary(self, all_results, chat_id=None, message_id=None):
-        """Send the shipment summary card to the Lark group chat."""
+        """Send the shipment summary as an interactive card grouped by client.
+
+        Falls back to the legacy markdown summary if the card can't be built
+        or Lark rejects it, so a rendering bug can never silence the 8am/8pm
+        report.
+        """
+        import card_builder
+
+        active = [r for r in all_results if not LarkClient._is_fully_delivered(r)]
+        if not active:
+            self.send_group_message(
+                "All shipments delivered. Nothing to track.",
+                chat_id=chat_id, message_id=message_id,
+            )
+            return
+
+        target_chat = chat_id or LARK_CHAT_ID
+        sheet_count = len({(r.get("sheet_token") or "") for r in active})
+
+        # Dashboard card (JSON 2.0) -> stacked card (1.0) -> markdown -> text.
+        builders = []
+        if os.environ.get("CARD_SCHEMA", "2.0").strip() == "2.0":
+            builders.append(card_builder.build_tracker_card_v2)
+        builders.append(card_builder.build_tracker_card)
+        for build in builders:
+            try:
+                card = build(active, sheet_count=sheet_count)
+                self._send_card(None, target_chat, message_id=message_id,
+                                card_json=json.dumps(card))
+                return
+            except Exception as e:
+                logger.warning("%s failed (%s), trying next layout",
+                               build.__name__, e)
+
+        try:
+            self.send_daily_summary_legacy(all_results, chat_id=chat_id,
+                                           message_id=message_id)
+        except Exception as e:
+            logger.error("Legacy summary failed too (%s), sending plain text", e)
+            self._send_text(card_builder.plain_text_fallback(active),
+                            target_chat, message_id)
+
+    def send_daily_summary_legacy(self, all_results, chat_id=None, message_id=None):
+        """Original markdown summary, grouped by sheet owner. Fallback only."""
         active = [r for r in all_results if not LarkClient._is_fully_delivered(r)]
         if not active:
             self.send_group_message(

@@ -26,6 +26,8 @@ import pytz
 from main import run_tracker
 from lark_client import LarkClient
 import chat  # NEW: the chat brain
+import card_builder  # NEW: the interactive tracker card
+import dashboard  # NEW: the web dashboard routes
 
 logging.basicConfig(
     level=logging.INFO,
@@ -132,6 +134,110 @@ def _bot_is_mentioned(msg):
     return False
 
 
+def _active_snapshot():
+    """Latest scan results, minus anything fully delivered."""
+    results = chat._SNAPSHOT.get("results") or []
+    return [r for r in results if not LarkClient._is_fully_delivered(r)]
+
+
+CARD_SCHEMA = os.environ.get("CARD_SCHEMA", "2.0").strip()
+
+
+def _build_card(client="all", status="all"):
+    """Dashboard card (JSON 2.0), falling back to the 1.0 layout."""
+    active = _active_snapshot()
+    sheet_count = len({(r.get("sheet_token") or "") for r in active})
+    if CARD_SCHEMA == "2.0":
+        try:
+            return card_builder.build_tracker_card_v2(
+                active, client=client, status=status, sheet_count=sheet_count
+            )
+        except Exception as e:
+            logger.warning("v2 card build failed (%s), using 1.0 layout", e)
+    return card_builder.build_tracker_card(
+        active, client=client, status=status, sheet_count=sheet_count
+    )
+
+
+def _post_tracker_card(chat_id=None):
+    """Send the interactive tracker card to a chat."""
+    target = chat_id or LARK_CHAT_ID
+    try:
+        lark._send_card(None, target, card_json=json.dumps(_build_card()))
+    except Exception as e:
+        logger.error("Tracker card send failed: %s", e)
+        lark.send_group_message(
+            card_builder.plain_text_fallback(_active_snapshot()), chat_id=target
+        )
+
+
+def _card_action_response(body):
+    """Re-render the tracker card for a filter button / dropdown click."""
+    event = body.get("event", body)
+    action = event.get("action", {}) or body.get("action", {}) or {}
+    value = action.get("value", {}) or {}
+
+    client = value.get("client", "all") or "all"
+    status = value.get("status", "all") or "all"
+
+    # select_static puts the chosen option in `option`; buttons carry it in value.
+    chosen = action.get("option") or ""
+    kind = value.get("action", "")
+    toast = None
+
+    if kind == "client_filter":
+        client = chosen or client
+    elif kind == "status_filter":
+        status = value.get("status", "all")
+    elif kind == "mark_delivered":
+        toast = _mark_delivered(chosen)
+
+    card = _build_card(client=client, status=status)
+
+    # Belt and braces: also patch the message directly, in case this Lark
+    # tenant doesn't apply the card returned in the callback response.
+    ctx = event.get("context", {}) or {}
+    msg_id = ctx.get("open_message_id") or body.get("open_message_id") or ""
+    if msg_id:
+        threading.Thread(
+            target=_safe_update_card, args=(msg_id, card), daemon=True
+        ).start()
+
+    if toast is None:
+        label = ("All clients" if client == "all"
+                 else client.replace("_", " ").title())
+        toast = {"type": "info", "content": "Showing %s" % label}
+    return {"toast": toast, "card": {"type": "raw", "data": card}}
+
+
+def _mark_delivered(option_value):
+    """Close out one shipment from the card and drop it from the snapshot."""
+    target = card_builder.parse_delivered_value(option_value)
+    if not target:
+        return {"type": "error", "content": "Couldn't identify that shipment"}
+    try:
+        lark.mark_delivered(target["sheet_token"], target["tab"],
+                            target["row_num"])
+    except Exception as e:
+        logger.error("mark_delivered failed for %s: %s", target, e)
+        return {"type": "error", "content": "Sheet write failed — %s" % str(e)[:80]}
+
+    results = chat._SNAPSHOT.get("results") or []
+    for r in results:
+        if ((r.get("sheet_token") or "") == target["sheet_token"]
+                and r.get("row_num") == target["row_num"]):
+            r["new_status"] = "Delivered"
+            r["raw_status"] = "Marked delivered manually"
+    return {"type": "success", "content": "Marked delivered"}
+
+
+def _safe_update_card(message_id, card):
+    try:
+        lark.update_message_card(message_id, card)
+    except Exception as e:
+        logger.warning("Card patch failed for %s: %s", message_id, e)
+
+
 def _handle_message(chat_id, message_id, question):
     """Route an @mention: live scan for 'refresh', else a chat answer."""
     try:
@@ -144,32 +250,19 @@ def _handle_message(chat_id, message_id, question):
             lark.send_group_message("This chat's ID is: %s" % chat_id, chat_id=chat_id, message_id=message_id)
             return
 
-        # Post the new card-layout summary (test) on request.
-        if _ql == "card" or _ql == "cardtest" or "card test" in _ql:
-            logger.info("CARD-TEST request in chat=%s", chat_id)
-            _g = "\U0001F7E2"; _b = "\U0001F535"; _w = "\u26AA"; _r = "\U0001F534"; _m = "\u00B7"
-            _card = {
-                "config": {"wide_screen_mode": True},
-                "header": {"template": "blue", "title": {"tag": "plain_text", "content": "\U0001F4E6 HLT Shipment Tracker"}},
-                "elements": [
-                    {"tag": "div", "text": {"tag": "lark_md", "content": _g + " **12** delivered   " + _b + " **41** in transit   " + _w + " **12** not scanned   " + _r + " **3** flagged"}},
-                    {"tag": "action", "actions": [{"tag": "select_static", "placeholder": {"tag": "plain_text", "content": "Filter by supplier"}, "value": {"key": "supplier_filter"}, "options": [
-                        {"text": {"tag": "plain_text", "content": "All suppliers"}, "value": "all"},
-                        {"text": {"tag": "plain_text", "content": "Denim Tears"}, "value": "denim_tears"},
-                        {"text": {"tag": "plain_text", "content": "7Brew Coffee"}, "value": "sevenbrew"},
-                        {"text": {"tag": "plain_text", "content": "Steady Hands"}, "value": "steady_hands"}
-                    ]}]},
-                    {"tag": "hr"},
-                    {"tag": "div", "text": {"tag": "lark_md", "content": "**Denim Tears**"}},
-                    {"tag": "div", "text": {"tag": "lark_md", "content": _g + " **HLT-SO6468** " + _m + " Out for delivery, Carlsbad CA " + _m + " `FedEx` " + _m + " **Today**\n" + _r + " **HLT-SO6583** " + _m + " Customs clearance delay, Sennan JP " + _m + " `FedEx` " + _m + " Aug 25"}},
-                    {"tag": "hr"},
-                    {"tag": "div", "text": {"tag": "lark_md", "content": "**7Brew Coffee**"}},
-                    {"tag": "div", "text": {"tag": "lark_md", "content": _b + " **HLT-SO6566** " + _m + " Import scan, Louisville KY " + _m + " `UPS` " + _m + " Aug 25"}},
-                    {"tag": "hr"},
-                    {"tag": "note", "elements": [{"tag": "plain_text", "content": "Demo layout \u2014 supplier filter wiring next"}]}
-                ]
-            }
-            lark._send_card(None, LARK_CHAT_ID, card_json=json.dumps(_card))
+        # Post the card summary on demand, from the latest snapshot.
+        if _ql in ("card", "cardtest", "tracker", "board") or "card test" in _ql:
+            logger.info("CARD request in chat=%s", chat_id)
+            if not chat.has_snapshot():
+                lark.send_group_message(
+                    "One sec \u2014 pulling the latest shipment data\u2026",
+                    chat_id=chat_id, message_id=message_id,
+                )
+                try:
+                    chat.update_snapshot(run_tracker(dry_run=True))
+                except Exception as e:
+                    logger.error("Card snapshot warm-up failed: %s", e)
+            _post_tracker_card(chat_id)
             return
 
         # Explicit live scan (also refreshes the chat snapshot).
@@ -224,7 +317,12 @@ def webhook():
             logger.info("CARD-ACTION payload=%s", json.dumps(body)[:1800])
         except Exception:
             logger.info("CARD-ACTION keys=%s", list(body.keys()))
-        return jsonify({"toast": {"type": "info", "content": "Received"}})
+        try:
+            return jsonify(_card_action_response(body))
+        except Exception as e:
+            logger.error("Card action failed: %s", e, exc_info=True)
+            return jsonify({"toast": {"type": "error",
+                                      "content": "Couldn't apply that filter"}})
     if event_type and event_type != "im.message.receive_v1":
         return jsonify({"code": 0})
 
@@ -269,6 +367,7 @@ def health():
 # -------------------------------------------------------------------------
 
 _fetch_bot_open_id()
+dashboard.register(app, chat, run_tracker, lark)
 start_scheduler()
 
 if __name__ == "__main__":
