@@ -55,41 +55,71 @@ def line_key(r):
                          r.get("row_num"))
 
 
-def open_orders(results):
-    """Order lines with quantity still to ship.
+def order_key(r):
+    """What makes two rows the same order line: client, order number, product."""
+    return (_s(r.get("customer")).lower() or _s(r.get("recipient")).lower(),
+            _s(r.get("order_num")).lower(),
+            _s(r.get("product_name")).lower())
 
-    A line is open when more was ordered than has shipped, or when it has a
-    quantity but no tracking number against it yet.
+
+def open_orders(results):
+    """Order lines with quantity still to ship, one entry per line.
+
+    Rows are grouped rather than read one at a time, because creating a
+    shipment APPENDS rows -- it does not edit the row the order was typed on.
+    Ship 300 of 600 and the sheet ends up holding the original line (600
+    ordered, 0 shipped) plus a new one (600 ordered, 300 shipped). Read row by
+    row, that line would show up twice and still claim 600 outstanding, so the
+    quantity left would never go down and the same units could be shipped
+    forever. Summing shipped across every row that shares a client, order
+    number and product is what makes "open" mean what it says.
     """
-    out = []
+    groups = {}
     for r in results or []:
         ordered = _int(r.get("qty_expected"))
         shipped = _int(r.get("qty_shipped"))
-        tracking = _s(r.get("tracking_num"))
         product = _s(r.get("product_name"))
-        order_num = _s(r.get("order_num"))
         if not ordered and not product:
             continue
-        remaining = max(0, ordered - shipped)
-        if not remaining and tracking:
+        g = groups.setdefault(order_key(r), {
+            "ordered": 0, "shipped": 0, "rows": [], "tracked": False,
+        })
+        # The order quantity is repeated on every row of the line, so the
+        # largest is the order -- summing it would multiply the order by the
+        # number of times it has been shipped against.
+        g["ordered"] = max(g["ordered"], ordered)
+        g["shipped"] += shipped
+        g["rows"].append(r)
+        if _s(r.get("tracking_num")):
+            g["tracked"] = True
+
+    out = []
+    for g in groups.values():
+        remaining = max(0, g["ordered"] - g["shipped"])
+        if not remaining and g["tracked"]:
             continue          # fully shipped and on its way
-        if not remaining and not ordered:
+        if not remaining and not g["ordered"]:
             continue          # nothing to go on
+        # Prefer an untracked row as the handle -- that's the order line
+        # itself rather than a shipment written against it.
+        rows = g["rows"]
+        head = next((r for r in rows if not _s(r.get("tracking_num"))), rows[0])
         out.append({
-            "key": line_key(r),
-            "board": _s(r.get("tab")),
-            "owner": _s(r.get("section")) or _s(r.get("tab")),
-            "client": _s(r.get("customer")) or _s(r.get("recipient")),
-            "order_num": order_num,
-            "product": product,
-            "photo": _s(r.get("product_photo")),
-            "ordered": ordered,
-            "shipped": shipped,
-            "remaining": remaining or ordered,
-            "sheet_token": _s(r.get("sheet_token")),
-            "tab": _s(r.get("tab")),
-            "row_num": r.get("row_num"),
-            "tracked": bool(tracking),
+            "key": line_key(head),
+            "board": _s(head.get("tab")),
+            "owner": _s(head.get("section")) or _s(head.get("tab")),
+            "client": _s(head.get("customer")) or _s(head.get("recipient")),
+            "order_num": _s(head.get("order_num")),
+            "product": _s(head.get("product_name")),
+            "photo": next((_s(r.get("product_photo")) for r in rows
+                           if _s(r.get("product_photo"))), ""),
+            "ordered": g["ordered"],
+            "shipped": g["shipped"],
+            "remaining": remaining or g["ordered"],
+            "sheet_token": _s(head.get("sheet_token")),
+            "tab": _s(head.get("tab")),
+            "row_num": head.get("row_num"),
+            "tracked": g["tracked"],
         })
     out.sort(key=lambda o: (o["client"].lower(), o["order_num"],
                             o["product"].lower()))

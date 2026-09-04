@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 # Bumped whenever the card/dashboard code changes. Logged at boot and exposed
 # on /dashboard/health so "is the fix actually deployed?" is one HTTP call
 # instead of a guess.
-BUILD_ID = "2026-09-04.manual-entry.1"
+BUILD_ID = "2026-09-04.filters.1"
 
 app = Flask(__name__)
 

@@ -219,6 +219,52 @@ check("picked lines still take the shipment client",
       {(u["col"], u["row"]): u["value"]
        for u in sc.plan(GOOD, ROWS, COLUMNS)["updates"]}.get(("E", 9)) == "7Brew")
 
+
+# ------------------------------------------- shipping against an order line
+# Creating a shipment appends rows; it does not edit the order row. So after
+# shipping 300 of 600 the sheet holds BOTH, and the open figure has to come
+# from summing them rather than reading either one.
+AFTER = ROWS + [
+    {"sheet_token": "tokA", "tab": "Hannah", "row_num": 9, "customer": "7Brew",
+     "order_num": "PO-1", "product_name": "Trucker Cap", "qty_expected": "200",
+     "qty_shipped": "120", "tracking_num": "1ZNEW0001"},
+]
+after = {o["product"]: o for o in sc.open_orders(AFTER)}
+check("a shipped-against line appears once, not twice",
+      len([o for o in sc.open_orders(AFTER) if o["product"] == "Trucker Cap"]) == 1)
+check("shipped quantities add up across rows", after["Trucker Cap"]["shipped"] == 120)
+check("open goes down by what shipped", after["Trucker Cap"]["remaining"] == 80)
+check("the order quantity is not multiplied", after["Trucker Cap"]["ordered"] == 200)
+check("the handle stays on the order row, not the shipment row",
+      after["Trucker Cap"]["row_num"] == 6)
+
+FULL = ROWS + [
+    {"sheet_token": "tokA", "tab": "Hannah", "row_num": 10, "customer": "7Brew",
+     "order_num": "PO-1", "product_name": "Trucker Cap", "qty_expected": "200",
+     "qty_shipped": "200", "tracking_num": "1ZNEW0002"},
+]
+check("a fully shipped line drops out",
+      "Trucker Cap" not in {o["product"] for o in sc.open_orders(FULL)})
+
+# Two shipments against one line still leave the right amount open.
+TWICE = AFTER + [
+    {"sheet_token": "tokA", "tab": "Hannah", "row_num": 11, "customer": "7Brew",
+     "order_num": "PO-1", "product_name": "Trucker Cap", "qty_expected": "200",
+     "qty_shipped": "50", "tracking_num": "1ZNEW0003"},
+]
+check("partial shipments accumulate",
+      {o["product"]: o for o in sc.open_orders(TWICE)}["Trucker Cap"]["remaining"] == 30)
+
+# A photo anywhere on the line is the line's photo.
+PIC = ROWS + [
+    {"sheet_token": "tokA", "tab": "Hannah", "row_num": 12, "customer": "7Brew",
+     "order_num": "PO-1", "product_name": "Trucker Cap", "qty_expected": "200",
+     "qty_shipped": "0", "product_photo": "https://x/cap.jpg"},
+]
+check("a photo on any row of the line is used",
+      {o["product"]: o for o in sc.open_orders(PIC)}["Trucker Cap"]["photo"]
+      == "https://x/cap.jpg")
+
 print("\n".join("  ok   %s" % p for p in PASS))
 if FAIL:
     print("\n".join("  FAIL %s" % f for f in FAIL))

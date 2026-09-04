@@ -113,10 +113,12 @@ h1{font-size:23px;line-height:1.2;margin:0;letter-spacing:-.02em;font-weight:680
 .chip[aria-pressed=true] .dot{box-shadow:0 0 0 2px rgba(255,255,255,.5)}
 .chip .c{opacity:.6;font-variant-numeric:tabular-nums}
 
-.controls{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;align-items:center}
+.controls{display:flex;gap:10px;flex-wrap:nowrap;margin-bottom:18px;align-items:center}
+@media (max-width:900px){.controls{flex-wrap:wrap}}
 .field{
   display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);
   background:var(--surface);border-radius:10px;padding:0 12px;height:40px;color:var(--ink-2);
+  flex:0 1 auto;min-width:0;
 }
 .field svg{width:15px;height:15px;flex:none;opacity:.65}
 .field select,.field input{
@@ -124,7 +126,7 @@ h1{font-size:23px;line-height:1.2;margin:0;letter-spacing:-.02em;font-weight:680
   outline:none;padding:0;height:100%;min-width:0;
 }
 .field select{cursor:pointer;padding-right:4px}
-.field.search{flex:1 1 260px;min-width:200px}
+.field.search{flex:1 1 300px;min-width:180px}
 .field.search input{width:100%}
 .field.search input::placeholder{color:var(--ink-3)}
 
@@ -231,6 +233,10 @@ h1{font-size:23px;line-height:1.2;margin:0;letter-spacing:-.02em;font-weight:680
   <div class="chips" id="chips"></div>
 
   <div class="controls">
+    <label class="field search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" type="search" placeholder="Search SO, tracking #, client, or location…" autocomplete="off">
+    </label>
     <label class="field">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 21V7l9-4 9 4v14M9 21v-6h6v6"/></svg>
       <select id="f-client"><option value="">All clients</option></select>
@@ -242,10 +248,6 @@ h1{font-size:23px;line-height:1.2;margin:0;letter-spacing:-.02em;font-weight:680
     <label class="field">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M2 7h11v9H2zM13 10h4l4 3v3h-8z"/><circle cx="6" cy="18" r="1.8"/><circle cx="17" cy="18" r="1.8"/></svg>
       <select id="f-carrier"><option value="">All carriers</option></select>
-    </label>
-    <label class="field search">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-      <input id="q" type="search" placeholder="Search SO, tracking #, client, or location…" autocomplete="off">
     </label>
     <label class="field">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
@@ -808,9 +810,8 @@ h1{font-size:23px;line-height:1.2;margin:0;letter-spacing:-.02em;font-weight:680
       <!-- 1: pick order lines -->
       <div class="pane on" data-pane="0">
         <div class="filters">
-          <div id="mk-boards"></div>
+          <input id="mk-q" type="search" placeholder="Search sales order, product, or client…" autocomplete="off">
           <select id="mk-client"><option value="">All clients</option></select>
-          <input id="mk-q" type="search" placeholder="Search product, PO, or client…" autocomplete="off">
           <button class="btn sm" id="mk-reload">Reload orders</button>
           <button class="btn sm" id="mk-manual">+ Add item manually</button>
         </div>
@@ -910,7 +911,7 @@ h1{font-size:23px;line-height:1.2;margin:0;letter-spacing:-.02em;font-weight:680
     invoice_num: "Invoice #", ship_date: "Date shipped", ddp: "DDP",
     product_name: "Product name / description"
   };
-  var orders = [], boardList = [], step = 0, board = "", loading = false;
+  var orders = [], boardList = [], step = 0, loading = false;
   // Lines typed by hand, for shipments that answer to no order line in the
   // sheets -- samples, replacements, anything the team is shipping today that
   // nobody entered upstream. They flow through the same create path.
@@ -968,7 +969,6 @@ h1{font-size:23px;line-height:1.2;margin:0;letter-spacing:-.02em;font-weight:680
           (d.clients || []).map(function (c) {
             return '<option value="' + esc(c) + '">' + esc(c) + "</option>";
           }).join("");
-        drawBoards();
         drawOrders();
       })
       .catch(function (e) {
@@ -978,21 +978,10 @@ h1{font-size:23px;line-height:1.2;margin:0;letter-spacing:-.02em;font-weight:680
       .finally(function () { loading = false; });
   }
 
-  function drawBoards() {
-    $("mk-boards").innerHTML =
-      '<button class="bchip' + (board ? "" : " on") + '" data-board="">All boards</button>' +
-      boardList.map(function (b) {
-        return '<button class="bchip' + (board === b.board ? " on" : "") +
-          '" data-board="' + esc(b.board) + '">' + esc(b.board) +
-          "<span>" + b.lines + "</span></button>";
-      }).join("");
-  }
-
   function visible() {
     var q = ($("mk-q").value || "").toLowerCase().trim();
     var client = $("mk-client").value;
     return orders.filter(function (o) {
-      if (board && o.board !== board) return false;
       if (client && o.client !== client) return false;
       if (!q) return true;
       return (o.product + " " + o.order_num + " " + o.client).toLowerCase().indexOf(q) >= 0;
@@ -1231,7 +1220,15 @@ h1{font-size:23px;line-height:1.2;margin:0;letter-spacing:-.02em;font-weight:680
         return '<option value="' + esc(b.token + "|" + b.board) + '">' +
           esc(b.board) + "</option>";
       }).join("");
+      // The tabs are months (AUG, SEP), so this month is the right guess for
+      // a shipment going out today -- nobody should have to pick it.
+      var mon = ["JAN","FEB","MAR","APR","MAY","JUN",
+                 "JUL","AUG","SEP","OCT","NOV","DEC"][new Date().getMonth()];
+      var here = boardList.filter(function (b) {
+        return (b.board || "").toUpperCase().indexOf(mon) === 0;
+      })[0];
       if (prev) sel.value = prev;
+      else if (here) sel.value = here.token + "|" + here.board;
     }
     var first = chosen()[0];
     if (first && !$("mk-f-client").value) $("mk-f-client").value = first.line.client || "";
@@ -1253,9 +1250,6 @@ h1{font-size:23px;line-height:1.2;margin:0;letter-spacing:-.02em;font-weight:680
     if (t.closest && t.closest("[data-mk=close]")) { close(); return; }
     if (t.id === "mk-open" || (t.closest && t.closest("#mk-open"))) { open(); return; }
     if (!mk.classList.contains("on")) return;
-
-    var chip = t.closest && t.closest(".bchip");
-    if (chip) { board = chip.getAttribute("data-board"); drawBoards(); drawOrders(); return; }
 
     var stepBtn = t.closest && t.closest(".step");
     if (stepBtn) { go(Number(stepBtn.getAttribute("data-step"))); return; }
