@@ -80,26 +80,32 @@ APP_ID = os.environ.get("LARK_APP_ID", "").strip()
 APPLINK_WEB_APP = "https://applink.larksuite.com/client/web_app/open"
 
 
-def lark_link(mode=None):
-    """The URL the card button should open.
+def lark_link(mode=None, status=""):
+    """The URL a card button should open.
 
     An AppLink into the registered web app when we have an app id, so the
     dashboard opens inside Lark rather than kicking the user to a browser;
     the plain link otherwise.
+
+    `status` carries the card's own bucket through to the board, so a chip
+    that says "8 Attention" in Lark opens those same eight shipments here --
+    the card and the dashboard stay one click apart instead of being two
+    views of the same data that you have to re-filter by hand.
     """
     target = dashboard_url()
     if not target:
         return ""
+    if status:
+        target += ("&" if "?" in target else "?") + "status=" + quote(status)
     mode = (mode or OPEN_MODE).strip()
     if mode != "web_app" or not APP_ID:
         return target
 
     link = "%s?appId=%s&mode=%s" % (APPLINK_WEB_APP, quote(APP_ID, safe=""),
                                     quote(OPEN_TARGET, safe=""))
-    # `path` can't carry ? or & -- Lark says so explicitly -- so a tokenised
-    # URL has to go through lk_target_url instead. With Lark SSO on, there is
-    # no token and the clean path form works everywhere.
-    if lark_auth.configured():
+    # `path` can't carry ? or & -- Lark says so explicitly -- so anything with
+    # a query string has to go through lk_target_url instead.
+    if lark_auth.configured() and not status:
         link += "&path=dashboard"
     else:
         link += "&lk_target_url=" + quote(target, safe="")
