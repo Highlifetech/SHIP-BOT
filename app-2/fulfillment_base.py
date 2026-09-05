@@ -86,7 +86,8 @@ class BaseStore:
         return origin + "?table=" + quote(table) + "&record=" + quote(record)
 
     def source_rows(self):
-        sources = self.settings['sources']
+        sources = [s for s in self.settings['sources']
+                   if not re.search(r'quote|quotation', s.get('name', ''), re.I)]
         tables = [ident(s['table_id']) for s in sources]
         if len(set(tables)) != len(tables) or self.table in tables:
             raise BaseError('A source table is duplicated or is the shipment table')
@@ -100,7 +101,7 @@ class BaseStore:
                 batches = list(pool.map(read_source, sources))
             return [row for batch in batches for row in batch]
         rows, seen_tables = [], set()
-        for source in self.settings["sources"]:
+        for source in sources:
             table = ident(source["table_id"])
             if table in seen_tables or table == self.table:
                 raise BaseError("A source table is duplicated or is the shipment table")
@@ -115,6 +116,8 @@ class BaseStore:
             for record in self.records(table):
                 values = record.get("fields", {})
                 row = {key: values.get(name) for key, name in mapping.items()}
+                if not text(row.get('order')):
+                    continue
                 row['ordered_quantity'] = values.get(mapping.get('ordered_quantity', 'Quantity'))
                 row['quantity_shipped'] = values.get(mapping.get('quantity_shipped', 'Quantity Shipped'))
                 row.update(key=table + ":" + record["record_id"], table_id=table,
@@ -123,8 +126,7 @@ class BaseStore:
                 # Prefer artwork over production-progress photos. Keep the field ID
                 # paired with the selected attachment for Lark's download permission.
                 candidates = [mapping.get("artwork"), "Production Artwork",
-                              "Approved Production Artwork", "Production Approved Artwork",
-                              mapping.get("photos")]
+                              "Approved Production Artwork", "Production Approved Artwork"]
                 photo_name = next((name for name in candidates if name and
                                    isinstance(values.get(name), list) and
                                    any(isinstance(f, dict) and f.get("file_token")
