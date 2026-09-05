@@ -35,6 +35,7 @@ import lark_auth
 import packing_list
 import shipment_create
 import fulfillment_web
+from background_sync import BackgroundSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +165,27 @@ def register(app, chat, run_tracker, lark, fulfillment_service=None):
     """
 
     fulfillment_web.register(app, lark, _authorized, current_user, service=fulfillment_service)
+
+    def read_tracking_dashboard():
+        results = run_tracker(dry_run=True)
+        chat.update_snapshot(results)
+        return card_builder.dashboard_payload(results, sheet_count=len({r.get('sheet_token', '') for r in results}))
+
+    tracking_sync = BackgroundSnapshot(read_tracking_dashboard, 300)
+    if fulfillment_service is None and os.environ.get('FULFILLMENT_CONFIG'):
+        tracking_sync.start()
+    app.extensions['shipping_tracking_sync'] = tracking_sync
+
+    @app.get('/api/shipping-workspace/tracking')
+    def workspace_tracking():
+        if not _authorized():
+            abort(403)
+        tracking_sync.start()
+        snapshot = tracking_sync.snapshot()
+        data = snapshot.pop('data')
+        if data is None:
+            data = card_builder.dashboard_payload(chat._SNAPSHOT.get('results') or [], sheet_count=0)
+        return jsonify(data=data, sync=snapshot)
 
     def _snapshot(force=False):
         results = chat._SNAPSHOT.get("results") or []

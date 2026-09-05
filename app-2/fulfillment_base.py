@@ -1,6 +1,7 @@
 """Lark Base adapter. No writes to production orders or legacy shipping sheets."""
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 
 import requests
@@ -85,6 +86,19 @@ class BaseStore:
         return origin + "?table=" + quote(table) + "&record=" + quote(record)
 
     def source_rows(self):
+        sources = self.settings['sources']
+        tables = [ident(s['table_id']) for s in sources]
+        if len(set(tables)) != len(tables) or self.table in tables:
+            raise BaseError('A source table is duplicated or is the shipment table')
+        if len(sources) > 1:
+            # Warm authentication before bounded concurrent read-only table requests.
+            self.lark._headers()
+            def read_source(source):
+                settings = dict(self.settings, sources=[source])
+                return BaseStore(self.lark, settings).source_rows()
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                batches = list(pool.map(read_source, sources))
+            return [row for batch in batches for row in batch]
         rows, seen_tables = [], set()
         for source in self.settings["sources"]:
             table = ident(source["table_id"])
@@ -101,6 +115,8 @@ class BaseStore:
             for record in self.records(table):
                 values = record.get("fields", {})
                 row = {key: values.get(name) for key, name in mapping.items()}
+                row['ordered_quantity'] = values.get(mapping.get('ordered_quantity', 'Quantity'))
+                row['quantity_shipped'] = values.get(mapping.get('quantity_shipped', 'Quantity Shipped'))
                 row.update(key=table + ":" + record["record_id"], table_id=table,
                            record_id=record["record_id"], source=source["name"],
                            source_url=self.record_link(table, record["record_id"]))

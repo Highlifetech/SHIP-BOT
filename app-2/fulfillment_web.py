@@ -10,6 +10,7 @@ from urllib.parse import quote, urlsplit
 from flask import Response, abort, jsonify, redirect, request
 from fulfillment import Coordinator, FulfillmentService, Problem
 from fulfillment_base import BaseError, BaseStore
+from background_sync import BackgroundSnapshot
 
 
 ROUTES = {"china_to_us": "China → US warehouse", "china_to_customer": "China → customer",
@@ -80,6 +81,43 @@ def register(app, lark, authorized, current_user, service=None):
         user = current_user() or {}
         return "%s (%s)" % (user.get("name", "Lark user"), user.get("open_id", "")) if user else "Shared dashboard access"
 
+    def read_catalog():
+        svc = get_service()
+        items, shipments = svc.read()
+        return {"items": items, "shipments": shipments, "can_save": bool(svc.coordinator),
+                "catalog_only": bool(svc.settings.get("catalog_only")),
+                "warehouse_address": svc.settings.get("warehouse_address", ""),
+                "demo": bool(svc.settings.get("demo"))}
+
+    catalog_sync = BackgroundSnapshot(read_catalog, 60)
+    if service is None and os.environ.get("FULFILLMENT_CONFIG"):
+        catalog_sync.start()
+    app.extensions['fulfillment_sync'] = catalog_sync
+
+    def sync_carriers():
+        nonlocal carrier_tracker
+        snapshot = catalog_sync.snapshot()['data'] or {}
+        if snapshot.get('demo'):
+            return {}
+        results = {}
+        for doc in snapshot.get('shipments', []):
+            if doc.get('status') != 'Shipped' or not doc.get('tracking') or doc.get('carrier') not in ('UPS', 'FedEx', 'DHL'):
+                continue
+            with tracking_lock:
+                if carrier_tracker is None:
+                    from carriers import CarrierTracker
+                    carrier_tracker = CarrierTracker()
+                result = carrier_tracker.track(doc['tracking'], doc['carrier'].lower())
+                result['checked_at'] = datetime.now(timezone.utc).isoformat()
+                tracking_cache[(doc['carrier'], doc['tracking'])] = (time.time(), result)
+                results[doc['submission_id']] = result
+        return results
+
+    carrier_sync = BackgroundSnapshot(sync_carriers, 300)
+    if service is None and os.environ.get('FULFILLMENT_CONFIG'):
+        carrier_sync.start()
+    app.extensions['fulfillment_carrier_sync'] = carrier_sync
+
     def photo_prefix():
         token = request.args.get("t") or request.headers.get("X-Dashboard-Token", "")
         return "/api/fulfillment/photo?" + ("t=" + quote(token, safe="") + "&" if token else "") + "key="
@@ -109,14 +147,22 @@ def register(app, lark, authorized, current_user, service=None):
     def fulfillment_catalog():
         guard()
         def get():
-            svc = get_service()
-            items, shipments = svc.read()
-            return {"items": items, "shipments": shipments, "can_save": bool(svc.coordinator),
-                    "synced_at": datetime.now(timezone.utc).isoformat(),
-                    "catalog_only": bool(svc.settings.get("catalog_only")),
-                    "warehouse_address": svc.settings.get("warehouse_address", ""),
-                    "demo": bool(svc.settings.get("demo"))}
+            if service is not None:
+                return dict(read_catalog(), synced_at=datetime.now(timezone.utc).isoformat())
+            catalog_sync.start()
+            snapshot = catalog_sync.snapshot()
+            data = snapshot.pop('data') or {"items": [], "shipments": [], "can_save": False, "catalog_only": True}
+            if snapshot['error']:
+                data['can_save'] = False
+            return dict(data, synced_at=snapshot['last_synced'], sync=snapshot)
         return respond(get)
+
+    @app.post('/api/fulfillment/sync')
+    def request_catalog_sync():
+        guard(True)
+        catalog_sync.start()
+        catalog_sync.request_refresh()
+        return jsonify(queued=True)
 
     @app.post("/api/fulfillment/preview")
     def fulfillment_preview():
@@ -134,14 +180,18 @@ def register(app, lark, authorized, current_user, service=None):
             if not isinstance(payload, dict):
                 raise Problem("Expected a shipment object")
             doc = get_service().save(payload, actor())
+            catalog_sync.request_refresh()
             return {"shipment": doc, "packing_url": "/fulfillment/packing-list/" + doc["submission_id"]}
         return respond(save)
 
     @app.post("/api/fulfillment/shipments/<submission>/<action>")
     def fulfillment_action(submission, action):
         guard(True)
-        return respond(lambda: {"shipment": get_service().transition(submission, action,
-                               request.get_json(silent=True) or {}, actor())})
+        def transition():
+            doc = get_service().transition(submission, action, request.get_json(silent=True) or {}, actor())
+            catalog_sync.request_refresh()
+            return {'shipment': doc}
+        return respond(transition)
 
     @app.get("/fulfillment/packing-list/<submission>")
     def fulfillment_packing(submission):
@@ -164,7 +214,8 @@ def register(app, lark, authorized, current_user, service=None):
                 doc = next((s for s in svc.store.shipments() if s["submission_id"] == submission), None)
                 lines = doc["lines"] if doc else []
             else:
-                lines = svc.store.source_rows()
+                snapshot = catalog_sync.snapshot()['data']
+                lines = snapshot['items'] if snapshot else svc.store.source_rows()
             line = next((l for l in lines if l["key"] == request.args.get("key")), None)
             if not line:
                 abort(404)

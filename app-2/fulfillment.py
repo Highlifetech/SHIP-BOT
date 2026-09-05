@@ -59,6 +59,11 @@ def inventory(rows, shipments):
     items = []
     for row in rows:
         item = {k: text(row.get(k)) for k in ("order", "customer", "product", "address", "source")}
+        for quantity in ('ordered_quantity', 'quantity_shipped'):
+            try:
+                item[quantity] = integer(row.get(quantity), quantity)
+            except Problem:
+                item[quantity] = None
         for k in ("key", "table_id", "record_id", "source_url", "photos", "photo_field_id"):
             item[k] = row.get(k, [] if k == "photos" else "")
         reasons = []
