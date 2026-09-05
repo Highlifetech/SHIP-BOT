@@ -8,7 +8,7 @@ class GateTests(unittest.TestCase):
         app = Flask(__name__)
         register(app)
         client = app.test_client()
-        for path in ['/dashboard', '/dashboard/legacy', '/dashboard/health',
+        for path in ['/dashboard', '/dashboard/legacy',
                      '/fulfillment', '/api/fulfillment/catalog',
                      '/api/fulfillment/photo?key=secret', '/packing-list?tracking=secret',
                      '/fulfillment/packing-list/secret', '/api/shipping-workspace/tracking',
@@ -24,6 +24,7 @@ class GateTests(unittest.TestCase):
     def test_health_and_lark_callback_not_intercepted(self):
         app = Flask(__name__)
         register(app)
+        self.assertEqual(app.test_client().get('/dashboard/health').json, {'ok': True, 'access': 'locked'})
         for path in ['/health', '/auth/lark/callback', '/webhook']:
             self.assertEqual(app.test_client().get(path).status_code, 404)
 

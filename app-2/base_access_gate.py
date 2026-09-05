@@ -12,6 +12,8 @@ def register(app):
     @app.before_request
     def require_verified_base_access():
         path = request.path
+        if path == '/dashboard/health':
+            return jsonify(ok=True, access='locked'), 200, {'Cache-Control': 'no-store'}
         protected = (path == '/dashboard' or path.startswith('/dashboard/')
                      or path == '/fulfillment' or path.startswith('/fulfillment/')
                      or path == '/packing-list' or path.startswith('/packing-list/')
