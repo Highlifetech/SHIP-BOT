@@ -158,6 +158,8 @@ def _page():
 
 
 def register(app, chat, run_tracker, lark, fulfillment_service=None):
+    import base_access_gate
+    base_access_gate.register(app)
     """Attach the dashboard routes to the Flask app.
 
     Takes its dependencies as arguments rather than importing webhook_server,
