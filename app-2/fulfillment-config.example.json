@@ -1,0 +1,22 @@
+{
+  "base_token": "VcAlbwImaab1KlsFLBVjunTNp1c",
+  "base_web_url": "https://off-menu.jp.larksuite.com/base/VcAlbwImaab1KlsFLBVjunTNp1c",
+  "shipment_table": "REPLACE_WITH_NEW_PICK_PACK_TABLE_ID",
+  "warehouse_address": "",
+  "sources": [
+    {
+      "name": "WORKSHOP OTHERS — PILOT",
+      "table_id": "tblFKKlCAbQa2l4h",
+      "fields": {
+        "order": "Sales Order",
+        "customer": "Client Name",
+        "product": "Description",
+        "address": "Address",
+        "photos": "Production Photos",
+        "opening_china": "Fulfillment Opening China",
+        "opening_us": "Fulfillment Opening US",
+        "ready": "Ready to Pack"
+      }
+    }
+  ]
+}

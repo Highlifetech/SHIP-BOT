@@ -209,7 +209,7 @@ h1{font-size:23px;line-height:1.2;margin:0;letter-spacing:-.02em;font-weight:680
         </svg>
       </div>
       <div>
-        <h1>Shipment Tracker</h1>
+        <h1>Shipment Tracker · Legacy</h1>
         <div class="sub" id="subtitle">All active shipments across Off Menu</div>
       </div>
     </div>
@@ -217,9 +217,11 @@ h1{font-size:23px;line-height:1.2;margin:0;letter-spacing:-.02em;font-weight:680
       <span>Last updated</span>
       <b id="updated">—</b>
     </div>
-    <button class="btn go" id="mk-open">
+    <a class="btn go" id="fulfillment-link" href="/fulfillment">New shipping workspace</a>
+    <script>{const t=new URLSearchParams(location.search).get('t');if(t)document.getElementById('fulfillment-link').href='/fulfillment?t='+encodeURIComponent(t);}</script>
+    <button class="btn" id="mk-open">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-      Add shipment
+      Legacy sheet entry
     </button>
     <button class="btn" id="refresh">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -568,7 +570,7 @@ h1{font-size:23px;line-height:1.2;margin:0;letter-spacing:-.02em;font-weight:680
 
   // ---------- data ----------
   function apiBase() {
-    var p = location.pathname.replace(/\/dashboard\/?$/, "");
+    var p = location.pathname.replace(/\/dashboard(?:\/legacy)?\/?$/, "");
     return p + "/api";
   }
   function token() {
@@ -926,7 +928,7 @@ h1{font-size:23px;line-height:1.2;margin:0;letter-spacing:-.02em;font-weight:680
   // Self-contained rather than borrowing the main script's helpers -- that
   // one is an IIFE, and reaching into it would couple the two.
   function apiBase() {
-    return location.pathname.replace(/\/dashboard\/?$/, "") + "/api";
+    return location.pathname.replace(/\/dashboard(?:\/legacy)?\/?$/, "") + "/api";
   }
   function token() {
     return new URLSearchParams(location.search).get("t") || "";

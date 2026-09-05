@@ -34,6 +34,7 @@ import config
 import lark_auth
 import packing_list
 import shipment_create
+import fulfillment_web
 
 logger = logging.getLogger(__name__)
 
@@ -155,12 +156,14 @@ def _page():
     return _html_cache["body"]
 
 
-def register(app, chat, run_tracker, lark):
+def register(app, chat, run_tracker, lark, fulfillment_service=None):
     """Attach the dashboard routes to the Flask app.
 
     Takes its dependencies as arguments rather than importing webhook_server,
     so this module stays importable on its own and easy to test.
     """
+
+    fulfillment_web.register(app, lark, _authorized, current_user, service=fulfillment_service)
 
     def _snapshot(force=False):
         results = chat._SNAPSHOT.get("results") or []
@@ -175,6 +178,7 @@ def register(app, chat, run_tracker, lark):
         return results
 
     @app.route("/dashboard", methods=["GET"])
+    @app.route("/dashboard/legacy", methods=["GET"])
     def dashboard_page():
         if not DASHBOARD_TOKEN and not lark_auth.configured():
             return Response(
@@ -187,7 +191,14 @@ def register(app, chat, run_tracker, lark):
             if lark_auth.configured():
                 return redirect(lark_auth.login_url(_callback_url()))
             abort(403)
-        return Response(_page(), mimetype="text/html")
+        # Preserve the previous tracker at an explicit route. Old notification
+        # links carrying tracker filters still land on the screen they describe.
+        legacy = (request.path.endswith("/legacy") or request.args.get("status")
+                  or os.environ.get("SHIPPING_LAYOUT") == "legacy")
+        if legacy:
+            return Response(_page(), mimetype="text/html")
+        return Response(fulfillment_web.page_html(), mimetype="text/html",
+                        headers={"Cache-Control": "no-store", "Referrer-Policy": "same-origin"})
 
     @app.route("/auth/lark/callback", methods=["GET"])
     def lark_callback():

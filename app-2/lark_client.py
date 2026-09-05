@@ -893,6 +893,24 @@ class LarkClient:
         import card_builder
 
         active = [r for r in all_results if not LarkClient._is_fully_delivered(r)]
+        if os.environ.get("SHIPPING_SUMMARY_LAYOUT", "new") != "legacy":
+            import shipping_summary
+            import card_lint
+            summary = shipping_summary.snapshot(self)
+            target_chat = chat_id or LARK_CHAT_ID
+            try:
+                card = shipping_summary.build_card(
+                    active, len({r.get("sheet_token") or "" for r in active}), summary)
+                if card_lint.lint_v2(card):
+                    raise ValueError("Invalid shipping summary card")
+                self._send_card(None, target_chat, message_id=message_id,
+                                card_json=json.dumps(card))
+            except Exception:
+                logger.warning("Shipping summary card unavailable; using text")
+                self._send_text(summary + "\n\nLegacy sheet tracker:\n" +
+                                card_builder.plain_text_fallback(active),
+                                target_chat, message_id)
+            return
         if not active:
             self.send_group_message(
                 "All shipments delivered. Nothing to track.",
