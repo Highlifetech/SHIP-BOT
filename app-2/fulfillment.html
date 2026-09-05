@@ -106,7 +106,7 @@ $('saved').onclick=async e=>{const pack=e.target.dataset.packing;if(pack){$('pre
 $('closePreview').onclick=()=>$('previewDialog').close();$('print').onclick=()=>{$('previewFrame').contentWindow.focus();$('previewFrame').contentWindow.print();};
 // Three-screen workspace. All shipment writes still use the verified fulfillment API.
 let wizardStep=1, dashboardRows=[], dashboardSync=null;
-const buckets={flagged:'Needs attention',arriving:'Out for delivery',transit:'In transit',unscanned:'Not scanned',delivered:'Delivered'};
+const buckets={unscanned:'Not Scanned',transit:'In Transit',arriving:'Out for Delivery',flagged:'On Hold',delivered:'Delivered'};
 let dashStatus='all';
 function safeURL(value){try{const u=new URL(value,location.origin);return ['https:','http:'].includes(u.protocol)?u.href:'#';}catch{return '#';}}
 function initWorkspace(){
