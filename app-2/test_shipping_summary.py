@@ -9,6 +9,18 @@ from lark_client import LarkClient
 
 
 class SummaryTests(unittest.TestCase):
+    def test_catalog_setup_cannot_enable_writes_or_invent_history(self):
+        import json
+        from fulfillment_web import configured_service
+        config = {"catalog_only": True, "base_token": "testbase",
+                  "sources": [{"table_id": "orders"}]}
+        with patch.dict(os.environ, {"FULFILLMENT_CONFIG": json.dumps(config),
+                        "FULFILLMENT_STATE_DIR": "/must-not-create", "FULFILLMENT_SINGLE_REPLICA": "1"}):
+            service = configured_service(Mock())
+            self.assertIsNone(service.coordinator)
+            self.assertEqual([], service.store.shipments())
+            self.assertIn("counts are not enabled", shipping_summary.snapshot(Mock()))
+
     def test_unconfigured(self):
         with patch.dict(os.environ, {"FULFILLMENT_CONFIG": ""}):
             self.assertIn("awaiting setup", shipping_summary.snapshot(Mock()))
@@ -17,7 +29,7 @@ class SummaryTests(unittest.TestCase):
         store = Mock()
         store.shipments.return_value = [{"status": s} for s in
                                        ("Packed", "Packed", "Shipped", "Received", "Cancelled")]
-        with patch("fulfillment_web.configured_service", return_value=SimpleNamespace(store=store)):
+        with patch("fulfillment_web.configured_service", return_value=SimpleNamespace(store=store, settings={})):
             self.assertIn("Packed: 2 · Shipped: 1 · Received: 1", shipping_summary.snapshot(Mock()))
             store.shipments.side_effect = RuntimeError("unavailable")
             self.assertIn("not reported as zero", shipping_summary.snapshot(Mock()))

@@ -4,6 +4,7 @@ import json
 import os
 import time
 import threading
+from datetime import datetime, timezone
 from urllib.parse import quote, urlsplit
 
 from flask import Response, abort, jsonify, redirect, request
@@ -58,10 +59,10 @@ def configured_service(lark):
     if not raw:
         return None
     settings = json.loads(raw)
-    if not settings.get("sources") or not settings.get("shipment_table"):
+    if not settings.get("sources") or (not settings.get("shipment_table") and not settings.get("catalog_only")):
         raise Problem("Configure approved order sources and the dedicated shipment table")
     directory = os.environ.get("FULFILLMENT_STATE_DIR")
-    writer = Coordinator(directory) if directory and os.environ.get("FULFILLMENT_SINGLE_REPLICA") == "1" else None
+    writer = Coordinator(directory) if directory and os.environ.get("FULFILLMENT_SINGLE_REPLICA") == "1" and not settings.get("catalog_only") else None
     return FulfillmentService(BaseStore(lark, settings), settings, writer)
 
 
@@ -111,6 +112,8 @@ def register(app, lark, authorized, current_user, service=None):
             svc = get_service()
             items, shipments = svc.read()
             return {"items": items, "shipments": shipments, "can_save": bool(svc.coordinator),
+                    "synced_at": datetime.now(timezone.utc).isoformat(),
+                    "catalog_only": bool(svc.settings.get("catalog_only")),
                     "warehouse_address": svc.settings.get("warehouse_address", ""),
                     "demo": bool(svc.settings.get("demo"))}
         return respond(get)

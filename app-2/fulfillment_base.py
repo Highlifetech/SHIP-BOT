@@ -41,7 +41,9 @@ class BaseStore:
         self.lark = lark
         self.settings = settings
         self.base = ident(settings["base_token"])
-        self.table = ident(settings["shipment_table"])
+        self.table = ident(settings["shipment_table"]) if settings.get("shipment_table") else None
+        if not self.table and not settings.get("catalog_only"):
+            raise BaseError("Dedicated shipment table is required")
         self.root = "/open-apis/bitable/v1/apps/" + self.base
 
     def api(self, method, path, **kwargs):
@@ -92,7 +94,7 @@ class BaseStore:
             mapping = source["fields"]
             metadata = self.fields(table)
             actual = {f["field_name"] for f in metadata}
-            required = ("order", "customer", "product", "opening_china", "ready")
+            required = ("order", "customer") if self.settings.get("catalog_only") else ("order", "customer", "product", "opening_china", "ready")
             missing = [mapping.get(k, k) for k in required if mapping.get(k) not in actual]
             if missing:
                 raise BaseError("%s: missing mapped fields: %s" % (source["name"], ", ".join(missing)))
@@ -111,6 +113,8 @@ class BaseStore:
         return rows
 
     def shipments(self):
+        if self.settings.get("catalog_only"):
+            return []  # Explicit read-only setup mode; never claims shipment history was imported.
         shipments = []
         seen = set()
         for row in self.records(self.table):

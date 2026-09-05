@@ -242,6 +242,8 @@ class FulfillmentTests(unittest.TestCase):
         self.assertEqual(client.post('/api/fulfillment/shipments', json=payload(), headers=headers).status_code, 403)
         response = client.get('/api/fulfillment/catalog', headers=headers)
         self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json['synced_at'].endswith('+00:00'))
+        self.assertFalse(response.json['catalog_only'])
         self.assertEqual(response.headers['Cache-Control'], 'no-store')
         headers['X-Fulfillment-Request'] = '1'
         response = client.post('/api/fulfillment/shipments', json=payload(), headers=headers)

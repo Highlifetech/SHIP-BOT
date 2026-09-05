@@ -8,6 +8,8 @@ def snapshot(lark):
         service = configured_service(lark)
         if service is None:
             return "Pick & pack: Production Base connection awaiting setup."
+        if service.settings.get("catalog_only"):
+            return "Pick & pack: order catalog connected in read-only setup mode. Shipment saving and batch counts are not enabled yet."
         # Only read saved manifests; never create reservations or query carriers.
         shipments = service.store.shipments()
         counts = {status: sum(s["status"] == status for s in shipments)
