@@ -19,7 +19,11 @@ class GateTests(unittest.TestCase):
                                          headers={'X-Dashboard-Token': 'shared'})
                     self.assertEqual(result.status_code, 403)
                     self.assertIn('no-store', result.headers['Cache-Control'])
-                    self.assertEqual(result.json['code'], 'BASE_PERMISSION_VERIFICATION_UNAVAILABLE')
+                    if path.startswith('/api'):
+                        self.assertEqual(result.json['code'], 'BASE_PERMISSION_VERIFICATION_UNAVAILABLE')
+                    else:
+                        self.assertIn(b'Access setup required', result.data)
+                        self.assertNotIn(b'trackingKpis', result.data)
 
     def test_health_and_lark_callback_not_intercepted(self):
         app = Flask(__name__)
