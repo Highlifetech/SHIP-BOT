@@ -120,9 +120,21 @@ class BaseStore:
                 row.update(key=table + ":" + record["record_id"], table_id=table,
                            record_id=record["record_id"], source=source["name"],
                            source_url=self.record_link(table, record["record_id"]))
+                # Prefer artwork over production-progress photos. Keep the field ID
+                # paired with the selected attachment for Lark's download permission.
+                candidates = [mapping.get("artwork"), "Production Artwork",
+                              "Approved Production Artwork", "Production Approved Artwork",
+                              mapping.get("photos")]
+                photo_name = next((name for name in candidates if name and
+                                   isinstance(values.get(name), list) and
+                                   any(isinstance(f, dict) and f.get("file_token")
+                                       for f in values[name])), None)
                 row["photo_field_id"] = next((f["field_id"] for f in metadata
-                                             if f["field_name"] == mapping.get("photos")), "")
-                photo = row.get("photos") or []
+                                             if f["field_name"] == photo_name), "")
+                photo = values.get(photo_name) or []
+                photo = sorted(photo, key=lambda f: not bool(re.search(
+                    r"\.(png|jpe?g|webp|gif)$", f.get("name", ""), re.I))
+                    if isinstance(f, dict) else True)
                 row["photos"] = [{"file_token": f["file_token"], "name": f.get("name", "Photo")}
                                  for f in photo if isinstance(f, dict) and f.get("file_token")]
                 rows.append(row)
