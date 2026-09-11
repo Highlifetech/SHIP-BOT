@@ -230,7 +230,10 @@ def _card_action_response(body):
     elif kind == "status_filter":
         status = value.get("status", "all")
     elif kind == "mark_delivered":
-        toast = _mark_delivered(chosen)
+        # A dropdown reports the chosen option in `option`; the per-shipment
+        # button names its shipment in the value, because a button has no
+        # options to choose from.
+        toast = _mark_delivered(chosen or value.get("handle", ""))
 
     card = _build_card(client=client, status=status)
 

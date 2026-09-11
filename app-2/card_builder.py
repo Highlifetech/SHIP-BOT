@@ -116,8 +116,19 @@ SHORTHAND = [
     ("customs clearance delay", "Customs delay"),
     ("held for payment of duties", "Held for duties"),
     ("processing at ups facility", "At UPS facility"),
+    # "Your package has been released by a government agency" was being cut
+    # to "...released by a", which reads as an unfinished sentence rather
+    # than the good news it is.
+    ("released by a government agency", "Cleared customs"),
+    ("has been released by", "Released by"),
+    ("is being held in customs", "Held in customs"),
+    ("awaiting customs clearance", "Awaiting customs"),
+    ("delivery attempted", "Delivery attempted"),
+    ("delivery will be rescheduled", "Delivery rescheduled"),
+    ("address information needed", "Needs an address"),
+    ("incorrect address", "Bad address"),
 ]
-MAX_DETAIL_CHARS = 46
+MAX_DETAIL_CHARS = 110
 
 # Carrier names as people write them, not as the sheet shouts them
 CARRIER_DISPLAY = {
@@ -383,17 +394,26 @@ def _short_date(raw):
     return clean
 
 
-def _detail(r, bucket):
-    """The human-readable middle of a shipment line."""
+def _detail(r, bucket, terse=False):
+    """The human-readable middle of a shipment line.
+
+    `terse` drops the day count, for callers that have already put how late
+    the shipment is at the front of the line -- "16d late ... Label created 16
+    days ago" said the same thing twice and crowded out the carrier's own
+    words, which are the part nobody can guess.
+    """
     raw = (r.get("raw_status") or "").strip()
     location = (r.get("location") or "").strip()
     city = location.replace(" - ", ",").split(",")[0].strip() if location else ""
 
     overdue = days_overdue(r)
-    unscanned_text = (
-        "Label created %d days ago, never scanned" % overdue
-        if overdue >= OVERDUE_DAYS else "Label created, not yet scanned"
-    )
+    if terse:
+        unscanned_text = "Never scanned"
+    else:
+        unscanned_text = (
+            "Label created %d days ago, never scanned" % overdue
+            if overdue >= OVERDUE_DAYS else "Label created, not yet scanned"
+        )
 
     status = (r.get("new_status") or "").upper()
     if raw and not ("LABEL CREATED" in status or "NOT SCANNED" in status):
@@ -468,6 +488,14 @@ def shipment_line(r, bucket=None, section=""):
     url = _tracking_url(tracking, carrier)
 
     parts = []
+
+    # How late it is goes first, where the eye lands. Fourteen days stuck and
+    # three days stuck were reading with identical weight, buried mid-sentence
+    # in the carrier's own words.
+    late = days_overdue(r)
+    if late and bucket in (FLAGGED, UNSCANNED):
+        parts.append("**%dd late**" % late)
+
     if tracking:
         parts.append("[**%s**](%s)" % (tracking, url) if url
                      else "**%s**" % tracking)
@@ -476,20 +504,31 @@ def shipment_line(r, bucket=None, section=""):
     if ref and ref != tracking:
         parts.append(ref)
 
-    name = line_name(r, section)        # customer
+    # Customer, or failing that whose desk it is. A line that names nobody
+    # reads as broken data -- and several sheet rows carry the tracking
+    # number on a continuation line with the client only on the head row.
+    name = line_name(r, section) or ("" if section else section_for(r))
     if name:
         parts.append(name)
 
-    parts.append(_detail(r, bucket))    # what's happening
+    parts.append(_detail(r, bucket, terse=bool(late)))   # what's happening
 
     if carrier:
         # Unknown short all-caps codes (EWS, GLS) stay as written.
         parts.append("`%s`" % CARRIER_DISPLAY.get(
             carrier, carrier if len(carrier) <= 5 else carrier.title()))
 
+    # A date on its own is read as a promise. When the date has already gone
+    # by, say so -- "Aug 27" and "ETA was Aug 27" are opposite news, and the
+    # card was showing them identically.
     date = _short_date(r.get("delivery_date"))
     if date:
-        parts.append("**%s**" % date if date in ("Today", "Tomorrow") else date)
+        if date in ("Today", "Tomorrow"):
+            parts.append("**%s**" % date)
+        elif days_overdue(r):
+            parts.append("<font color='grey'>ETA was %s</font>" % date)
+        else:
+            parts.append(date)
 
     boxes = str(r.get("num_boxes") or "").strip()
     packages = r.get("packages") or []
@@ -782,18 +821,31 @@ STATUS_TABS_V2 = [
 ]
 
 
-def _kpi_tile(value, label, color=""):
-    number = "**%s**" % value
-    if color:
-        number = "<font color='%s'>%s</font>" % (color, number)
+def _kpi_tile(count, label, bucket, active, target):
+    """One clickable stat tile.
+
+    The whole tile is the control, not a button inside it -- a number you can
+    read across the room and press with a thumb, instead of four code spans
+    that looked like tabs and did nothing.
+    """
+    colour = TAG_COLOR.get(bucket, "grey")
+    number = "**%d**" % count if count else "<font color='grey'>0</font>"
+    if count and bucket == FLAGGED:
+        number = "<font color='red'>**%d**</font>" % count
     return {
-        "tag": "column",
-        "width": "weighted",
-        "weight": 1,
-        "vertical_align": "top",
+        "tag": "interactive_container",
+        "width": "fill",
+        "padding": "8px 10px 8px 10px",
+        "corner_radius": "8px",
+        "has_border": True,
+        "border_color": colour if active else "grey",
+        "background_style": "grey" if active else "default",
+        "behaviors": [{"type": "callback", "value": target}],
         "elements": [
             {"tag": "markdown", "text_size": "heading", "content": number},
-            {"tag": "markdown", "content": "<font color='grey'>%s</font>" % label},
+            {"tag": "markdown",
+             "content": "<font color='grey'>%s %s</font>"
+                        % (BUCKET_DOT[bucket], label)},
         ],
     }
 
@@ -808,43 +860,193 @@ def _tab_button(label, count, value, active):
     }
 
 
-def _table_row(r):
+def _table_row(r, scope=""):
+    """One shipment as a table row.
+
+    A table gives every shipment the same columns in the same places, so the
+    eye runs down "how late" instead of re-parsing a sentence per line.
+    """
     bucket = bucket_for(r)
     tracking = (r.get("tracking_num") or "").strip()
     carrier = (r.get("carrier") or "").strip().upper()
     url = _tracking_url(tracking, carrier)
     ref = _ref(r)
+    late = days_overdue(r)
 
+    # One column for "when", because a shipment is either late by so many days
+    # or due on a date -- never both. Six columns did not fit the card and the
+    # ETA was being cut off the right edge.
     eta = _short_date(r.get("delivery_date"))
-    overdue = days_overdue(r)
-    if bucket == FLAGGED and overdue >= OVERDUE_DAYS and eta:
-        eta = "%s (%dd late)" % (eta, overdue)
+    when = "%dd late" % late if late else (eta or "—")
 
     return {
-        "shipment": "[%s](%s)" % (ref, url) if url else ref,
-        "client": line_name(r, "") or "—",
+        "shipment": "[%s](%s)" % (ref, url) if url else (ref or "—"),
+        "client": (line_name(r, scope) or ("" if scope else section_for(r))
+                   or "—"),
         "status": [{"text": TAG_TEXT[bucket], "color": TAG_COLOR[bucket]}],
-        "detail": _detail(r, bucket),
-        "carrier": (CARRIER_DISPLAY.get(carrier, carrier if len(carrier) <= 5
-                                        else carrier.title()) or "—"),
-        "eta": eta or "—",
+        "when": when,
+        "detail": _detail(r, bucket, terse=bool(late)) or "—",
     }
 
 
 TABLE_COLUMNS = [
     {"name": "shipment", "display_name": "SHIPMENT", "data_type": "lark_md",
-     "width": "150px"},
-    {"name": "client", "display_name": "CLIENT", "data_type": "text",
-     "width": "150px"},
-    {"name": "status", "display_name": "STATUS", "data_type": "options",
-     "width": "130px"},
-    {"name": "detail", "display_name": "DETAIL", "data_type": "text",
      "width": "auto"},
-    {"name": "carrier", "display_name": "CARRIER", "data_type": "text",
-     "width": "90px"},
-    {"name": "eta", "display_name": "ETA", "data_type": "text",
-     "width": "120px"},
+    {"name": "client", "display_name": "CLIENT", "data_type": "text",
+     "width": "auto"},
+    {"name": "status", "display_name": "STATUS", "data_type": "options",
+     "width": "108px"},
+    {"name": "when", "display_name": "WHEN", "data_type": "text",
+     "width": "86px"},
+    {"name": "detail", "display_name": "LAST SCAN", "data_type": "text",
+     "width": "auto"},
 ]
+
+
+def _columns_for(rows):
+    """The columns worth spending width on for this particular list.
+
+    A card is about 500px wide. When every row in a section carries the same
+    status -- which is the whole point of a section called "Needs Attention"
+    -- the status pill is 110px repeating one word, and it pushes the
+    carrier's own words off the right edge. So it earns its place only on a
+    mixed list.
+    """
+    mixed = len({bucket_for(r) for r in rows}) > 1
+    return [c for c in TABLE_COLUMNS if mixed or c["name"] != "status"]
+
+
+def _table(rows, scope="", limit=6):
+    """A shipment table, or nothing at all when there is nothing to show."""
+    if not rows:
+        return []
+    shown = rows[:limit]
+    return [{
+        "tag": "table",
+        "page_size": max(1, len(shown)),
+        "row_height": "low",
+        "header_style": {"text_size": "small", "text_color": "grey",
+                         "bold": True, "lines": 1},
+        "freeze_first_column": True,
+        "columns": _columns_for(shown),
+        "rows": [_table_row(r, scope) for r in shown],
+    }]
+
+
+def _action_row(r, scope=""):
+    """One shipment you can act on without leaving the chat.
+
+    A table row can only be read. This carries the two things anyone actually
+    does with a stuck parcel -- look at the carrier's page, or close it out
+    because it arrived and the carrier never said so.
+    """
+    bucket = bucket_for(r)
+    tracking = (r.get("tracking_num") or "").strip()
+    carrier = (r.get("carrier") or "").strip().upper()
+    url = _tracking_url(tracking, carrier)
+    late = days_overdue(r)
+    who = line_name(r, scope) or ("" if scope else section_for(r))
+
+    # Headline: the reference someone quotes, and who it is for.
+    head = "**%s**" % (_ref(r) or tracking or "No tracking #")
+    if who:
+        head += " %s %s" % (SEP, who)
+
+    # How late, in red, at the end of the same line -- the number the eye is
+    # hunting for on a card full of problems.
+    if late:
+        head += ("  <font color='red'>**%dd late**</font>" % late)
+    else:
+        eta = _short_date(r.get("delivery_date"))
+        if eta:
+            head += "  <font color='grey'>%s</font>" % eta
+
+    meta = [_detail(r, bucket, terse=bool(late))]
+    if carrier:
+        meta.append(CARRIER_DISPLAY.get(
+            carrier, carrier if len(carrier) <= 5 else carrier.title()))
+    if tracking and _ref(r) != tracking:
+        meta.append(tracking)
+    boxes = str(r.get("num_boxes") or "").strip()
+    packages = r.get("packages") or []
+    n_boxes = len(packages) if len(packages) > 1 else (
+        int(boxes) if boxes.isdigit() and int(boxes) > 1 else 0)
+    if n_boxes:
+        meta.append("%d boxes" % n_boxes)
+
+    buttons = []
+    if url:
+        buttons.append({
+            "tag": "button", "size": "tiny", "type": "default",
+            "text": {"tag": "plain_text", "content": "Track"},
+            "behaviors": [{"type": "open_url", "default_url": url}],
+        })
+    buttons.append({
+        "tag": "button", "size": "tiny", "type": "default",
+        "text": {"tag": "plain_text", "content": "Mark delivered"},
+        "behaviors": [{"type": "callback",
+                       "value": {"action": "mark_delivered",
+                                 "handle": mark_delivered_value(r)}}],
+    })
+
+    return {
+        "tag": "interactive_container",
+        "width": "fill",
+        "padding": "9px 11px 9px 11px",
+        "corner_radius": "8px",
+        "has_border": True,
+        "border_color": TAG_COLOR.get(bucket, "grey"),
+        "behaviors": [{"type": "open_url", "default_url": url}] if url else [],
+        "elements": [
+            {"tag": "markdown", "content": head},
+            {"tag": "markdown",
+             "content": "<font color='grey'>%s</font>"
+                        % (" %s " % SEP).join(m for m in meta if m)},
+            {"tag": "column_set", "flex_mode": "flow",
+             "horizontal_spacing": "6px", "margin": "7px 0px 0px 0px",
+             "columns": [{"tag": "column", "width": "auto",
+                          "elements": [b]} for b in buttons]},
+        ],
+    }
+
+
+def _person_block(name, rows, top, scope_note=""):
+    """One person's pile: a heading, their worst few, the rest folded away."""
+    if not rows:
+        return []
+    late = sum(1 for r in rows if days_overdue(r))
+    bits = ["%d open" % len(rows)]
+    if late:
+        bits.append("%d late" % late)
+    out = [
+        {"tag": "markdown", "margin": "12px 0px 0px 0px",
+         "content": "**%s**  <font color='grey'>%s</font>"
+                    % (name, (" %s " % SEP).join(bits))},
+    ]
+    out += [_action_row(r, scope=name) for r in rows[:top]]
+    rest = rows[top:]
+    if rest:
+        out += _overflow_panel(rest, "%d more for %s" % (len(rest), name),
+                               scope=name)
+    return out
+
+
+def _overflow_panel(rows, title, scope=""):
+    """The rest of the list, folded away until someone wants it."""
+    if not rows:
+        return []
+    return [{
+        "tag": "collapsible_panel",
+        "expanded": False,
+        "background_style": "default",
+        "header": {
+            "title": {"tag": "markdown",
+                      "content": "<font color='grey'>%s</font>" % title},
+            "vertical_align": "center",
+            "icon_position": "right",
+        },
+        "elements": _table(rows, scope, limit=len(rows)),
+    }]
 
 
 def _arriving_today(r):
@@ -855,7 +1057,8 @@ def _arriving_today(r):
     return bool(eta) and eta == _now_et().date() and bucket_for(r) == TRANSIT
 
 
-SUMMARY_ROWS = 5      # per section on the overview
+SUMMARY_ROWS = 2      # per person on the overview -- a nudge
+TAB_ROWS = 4          # per person once a tile is pressed
 CLIENT_ROWS = 6       # when one client is selected
 DETAIL_ROWS = 16      # when a status filter is on
 
@@ -907,53 +1110,99 @@ def build_tracker_card_v2(results, client="all", status="all", sheet_count=None)
     n_transit = totals[TRANSIT] + totals[ARRIVING] - n_today
 
     def _order(rs):
+        """Worst first.
+
+        Alphabetical order by client put a three-day-old problem above a
+        fourteen-day-old one, and the five lines that fit on the card are the
+        only ones anybody reads. Days late now decides, and the client name is
+        just the tie-breaker.
+        """
         return sorted(rs, key=lambda r: (BUCKET_ORDER[bucket_for(r)],
+                                         -days_overdue(r),
                                          section_for(r), _ref(r)))
 
-    # --- header line + chips ----------------------------------------------
+    # --- stat tiles ---------------------------------------------------------
+    #
+    # The count IS the control. Press a tile to filter the card to it; press
+    # the one you are already on to come back.
+    tiles = [
+        ("Attention", totals[FLAGGED], FLAGGED),
+        ("Today", n_today, ARRIVING),
+        ("Transit", max(0, n_transit), TRANSIT),
+        ("Unscanned", totals[UNSCANNED], UNSCANNED),
+    ]
     elements = [{
-        "tag": "markdown",
-        "content": "**%d open** <font color='grey'>%s Updated %s</font>"
-                   % (len(listable), SEP, _now_et().strftime("%-I:%M %p")),
-    }, {
-        "tag": "markdown",
-        "content": "   ".join([
-            "`%s %d Attention`" % (DOT_FLAGGED, totals[FLAGGED]),
-            "`%s %d Today`" % (DOT_ARRIVING, n_today),
-            "`%s %d Transit`" % (DOT_TRANSIT, max(0, n_transit)),
-            "`%s %d Unscanned`" % (DOT_UNSCANNED, totals[UNSCANNED]),
-        ]),
+        "tag": "column_set", "flex_mode": "bisect", "horizontal_spacing": "6px",
+        "columns": [
+            {"tag": "column", "width": "weighted", "weight": 1,
+             "elements": [_kpi_tile(
+                 count, label, key, status == key,
+                 {"action": "status_filter", "client": client,
+                  "status": "all" if status == key else key})]}
+            for label, count, key in tiles
+        ],
     }]
 
-    # --- body: one client, one status, or the overview --------------------
+    # --- body: everyone's pile, worst first ---------------------------------
+    #
+    # Grouped by person, because that is how the work is actually divided --
+    # Hannah does not need to read past Lucy's parcels to find her own. Each
+    # person shows only their worst few; the rest folds away. The card is a
+    # nudge, the dashboard is the record.
+
+    def by_person(rows, top):
+        """Sections in their usual order, each already worst-first."""
+        out, grouped = [], group_by_section(rows)
+        for name in list(grouped)[:MAX_CLIENTS]:
+            out += _person_block(name, _order(grouped[name]), top)
+        return out
+
     if client and client != "all":
         name = next((n for n in sections if slugify(n) == client), client)
         mine = _order(sections.get(name, []))
-        bits = ["%d open" % len(mine)]
-        n_att = sum(1 for r in mine if bucket_for(r) == FLAGGED)
-        n_due = sum(1 for r in mine if _arriving_today(r))
-        if n_att:
-            bits.append("%d attention" % n_att)
-        if n_due:
-            bits.append("%d arriving today" % n_due)
-        elements += _section(name, mine, CLIENT_ROWS,
-                             (" %s " % SEP).join(bits), scope=name)
-    elif status == FLAGGED:
-        elements += _section("Needs Attention", _order(flagged), DETAIL_ROWS)
-    elif status == TRANSIT:
-        elements += _section("In Transit",
-                             _order([r for r in listable
-                                     if bucket_for(r) in (TRANSIT, ARRIVING)]),
-                             DETAIL_ROWS)
-    elif status == UNSCANNED:
-        elements += _section("Not Yet Scanned",
-                             _order([r for r in listable
-                                     if bucket_for(r) == UNSCANNED]),
-                             DETAIL_ROWS)
+        elements += _person_block(name, mine, CLIENT_ROWS)
+        if not mine:
+            elements.append({"tag": "markdown", "margin": "12px 0px 0px 0px",
+                             "content": "<font color='grey'>Nothing open for "
+                                        "%s.</font>" % name})
+    elif status in (FLAGGED, ARRIVING, TRANSIT, UNSCANNED):
+        title, rows = {
+            FLAGGED: ("Needs attention", flagged),
+            ARRIVING: ("Arriving today", today),
+            TRANSIT: ("In transit",
+                      [r for r in listable
+                       if bucket_for(r) in (TRANSIT, ARRIVING)
+                       and not _arriving_today(r)]),
+            UNSCANNED: ("Not yet scanned",
+                        [r for r in listable if bucket_for(r) == UNSCANNED]),
+        }[status]
+        elements.append({"tag": "markdown", "margin": "10px 0px 0px 0px",
+                         "content": "**%s** <font color='grey'>%s %d "
+                                    "shipment%s</font>"
+                                    % (title, SEP, len(rows),
+                                       "" if len(rows) == 1 else "s")})
+        if rows:
+            elements += by_person(rows, TAB_ROWS)
+        else:
+            elements.append({"tag": "markdown",
+                             "content": "<font color='grey'>Nothing here "
+                                        "right now.</font>"})
     else:
-        elements += _section("Needs Attention", _order(flagged), SUMMARY_ROWS)
-        elements += _section("Arriving Today", _order(today), SUMMARY_ROWS,
-                             force_bucket=ARRIVING)
+        urgent = flagged + [r for r in today if r not in flagged]
+        if urgent:
+            elements += by_person(urgent, SUMMARY_ROWS)
+            quiet = len(listable) - len(urgent)
+            if quiet > 0:
+                elements.append({
+                    "tag": "markdown", "margin": "12px 0px 0px 0px",
+                    "content": "<font color='grey'>%d more moving normally "
+                               "%s nothing needed</font>" % (quiet, SEP)})
+        else:
+            elements.append({
+                "tag": "markdown", "margin": "12px 0px 0px 0px",
+                "content": "<font color='green'>**All %d shipments moving.** "
+                           "Nothing needs attention and nothing lands "
+                           "today.</font>" % len(listable)})
 
     # --- actions -----------------------------------------------------------
     buttons = []
@@ -968,15 +1217,9 @@ def build_tracker_card_v2(results, client="all", status="all", sheet_count=None)
             "text": {"tag": "plain_text", "content": "Open Full Dashboard"},
             "behaviors": [{"type": "open_url", "default_url": deep_link}],
         })
-    if status == "all" and client == "all" and totals[FLAGGED] > SUMMARY_ROWS:
-        buttons.append({
-            "tag": "button", "size": "small", "type": "default",
-            "text": {"tag": "plain_text", "content": "View All Attention"},
-            "behaviors": [{"type": "callback",
-                           "value": {"action": "status_filter",
-                                     "status": FLAGGED, "client": client}}],
-        })
-    elif status != "all" or client != "all":
+    # "View All Attention" used to live here. The Attention tab above now does
+    # exactly that, and two controls for one action is how a card gets noisy.
+    if status != "all" or client != "all":
         buttons.append({
             "tag": "button", "size": "small", "type": "default",
             "text": {"tag": "plain_text", "content": "Back to summary"},
@@ -994,14 +1237,17 @@ def build_tracker_card_v2(results, client="all", status="all", sheet_count=None)
                         for b in buttons],
         })
 
-    # --- client picker -----------------------------------------------------
-    elements.append({
+    # --- client picker + mark delivered, side by side ----------------------
+    #
+    # Two selects in one column_set, because they are one thought: narrow to a
+    # client, then close out one of their shipments. Stacked, they cost a row
+    # of card height each; separate action blocks is what stacks them.
+    pickers = [{
         "tag": "select_static",
         "initial_option": client,
-        "margin": "6px 0px 0px 0px",
         "placeholder": {"tag": "plain_text", "content": "Client: All Clients"},
         "behaviors": [{"type": "callback",
-                       "value": {"action": "client_filter", "status": "all"}}],
+                       "value": {"action": "client_filter", "status": status}}],
         "options": [{"text": {"tag": "plain_text", "content": "All Clients"},
                      "value": "all"}] + [
             {"text": {"tag": "plain_text",
@@ -1009,22 +1255,53 @@ def build_tracker_card_v2(results, client="all", status="all", sheet_count=None)
              "value": slugify(n)}
             for n in list(sections)[:MAX_TABS]
         ],
+    }]
+
+    # The bulk mark-delivered dropdown used to live here. Every shipment now
+    # carries its own button, so a second control listing the same shipments
+    # is one more thing to read and one more way to pick the wrong row.
+
+    elements.append({
+        "tag": "column_set", "flex_mode": "flow", "horizontal_spacing": "8px",
+        "margin": "6px 0px 0px 0px",
+        "columns": [{"tag": "column", "width": "weighted", "weight": 1,
+                     "vertical_align": "center", "elements": [p]}
+                    for p in pickers],
     })
 
-    note_bits = ["%d sheets" % sheet_count] if sheet_count else []
+    # How many spreadsheets were read is our plumbing, not their news.
+    note_bits = []
     if totals[DELIVERED]:
-        note_bits.append("%d delivered" % totals[DELIVERED])
+        note_bits.append("%d delivered today" % totals[DELIVERED])
     if note_bits:
         elements.append({"tag": "markdown", "margin": "6px 0px 0px 0px",
                          "content": "<font color='grey'>%s</font>"
                                     % (" %s " % SEP).join(note_bits)})
 
+    # The header carries the state of the board: the count, the freshness, and
+    # a tag that says whether anything is wrong. Those three were taking a
+    # body line each.
+    tags = []
+    if totals[FLAGGED]:
+        tags.append({"tag": "text_tag", "color": "red",
+                     "text": {"tag": "plain_text",
+                              "content": "%d need attention"
+                                         % totals[FLAGGED]}})
+    elif listable:
+        tags.append({"tag": "text_tag", "color": "green",
+                     "text": {"tag": "plain_text", "content": "All moving"}})
+
     return {
         "schema": "2.0",
-        "config": {"update_multi": True},
+        "config": {"update_multi": True, "width_mode": "fill"},
         "header": {
             "title": {"tag": "plain_text",
                       "content": "\U0001F4E6 Shipment Tracker"},
+            "subtitle": {"tag": "plain_text",
+                         "content": "%d open %s updated %s"
+                                    % (len(listable), SEP,
+                                       _now_et().strftime("%-I:%M %p"))},
+            "text_tag_list": tags,
             "template": "red" if totals[FLAGGED] else "blue",
         },
         "body": {"direction": "vertical", "padding": "12px 12px 12px 12px",
