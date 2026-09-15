@@ -6,6 +6,8 @@ from urllib.parse import quote
 
 import requests
 
+from refs import canonical_ref
+
 
 class BaseError(RuntimeError):
     pass
@@ -120,6 +122,10 @@ class BaseStore:
                 row = {key: values.get(name) for key, name in mapping.items()}
                 if not text(row.get('order')):
                     continue
+                # The Base spells order numbers the same way the sheets do,
+                # letter O and all. Fold it here so an order pulled directly
+                # matches the same order seen through the sheet.
+                row['order'] = canonical_ref(text(row.get('order')))
                 row['ordered_quantity'] = values.get(mapping.get('ordered_quantity', 'Quantity'))
                 row['quantity_shipped'] = values.get(mapping.get('quantity_shipped', 'Quantity Shipped'))
                 row['tracking'] = values.get(mapping.get('tracking', 'Tracking Number'))
