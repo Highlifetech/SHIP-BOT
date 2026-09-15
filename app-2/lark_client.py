@@ -18,6 +18,7 @@ from datetime import datetime
 import time
 import requests
 
+from refs import canonical_ref
 from config import (
     LARK_APP_ID,
     LARK_APP_SECRET,
@@ -274,7 +275,8 @@ class LarkClient:
             while len(row) < MIN_COLS:
                 row.append("")
 
-            shipment_id_raw = cell(row, i_shipment)
+            shipment_id_raw = canonical_ref(cell(row, i_shipment))
+            order_num = canonical_ref(cell(row, i_order))
             tracking_tokens = [t for t in (clean_tracking(t) for t in cell(row, i_tracking).split()) if t]
             tracking_raw = tracking_tokens[0] if tracking_tokens else ""
             if cell(row, i_tracking) and not tracking_raw:
@@ -295,7 +297,7 @@ class LarkClient:
 
             shipment_id = shipment_id_raw or ("" if starts_new_shipment
                                               else last_shipment_id)
-            tracking = tracking_raw or ("" if (shipment_id_raw or cell(row, i_order)) else last_tracking)
+            tracking = tracking_raw or ("" if (shipment_id_raw or order_num) else last_tracking)
             carrier = carrier_raw or last_carrier
             num_boxes = num_boxes_raw or last_num_boxes
 
@@ -334,7 +336,7 @@ class LarkClient:
                 "vendor": cell(row, i_vendor),
                 "recipient": cell(row, i_recipient),
                 "customer": cell(row, i_customer),
-                "order_num": cell(row, i_order),
+                "order_num": order_num,
                 "tracking_num": tracking, "extra_tracking": max(0, len(tracking_tokens) - 1),
                 "carrier": carrier,
                 "num_boxes": num_boxes,
